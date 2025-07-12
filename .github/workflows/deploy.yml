@@ -1,0 +1,36 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Deploy Backend to Render
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      env:
+        deploy_url: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+      run: |
+        curl -X POST "$deploy_url"
+    
+    - name: Deploy Frontend to Render
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      env:
+        deploy_url: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+      run: |
+        curl -X POST "$deploy_url"
+    
+    - name: Wait for deployment
+      run: sleep 30
+    
+    - name: Health check
+      run: |
+        curl -f ${{ secrets.BACKEND_URL }}/health || exit 1
+        curl -f ${{ secrets.FRONTEND_URL }} || exit 1

@@ -1,0 +1,40 @@
+services:
+  # PostgreSQL Database
+  - type: postgres
+    name: raffle-db
+    plan: free
+    databaseName: raffledb
+    user: raffleuser
+
+  # Backend API
+  - type: web
+    name: raffle-api
+    env: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: raffle-db
+          property: connectionString
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        value: https://raffle-app.onrender.com
+      - key: SECRET_KEY
+        generateValue: true
+    healthCheckPath: /
+
+  # Frontend App
+  - type: web
+    name: raffle-app  
+    env: docker
+    plan: free
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://raffle-api.onrender.com/api
+      - key: REACT_APP_WS_URL
+        value: wss://raffle-api.onrender.com
