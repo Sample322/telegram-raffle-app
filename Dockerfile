@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies (включая dev dependencies для сборки)
+RUN npm install
 
 # Copy source code
 COPY . .
