@@ -1,49 +1,29 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import asyncio
-from typing import Dict, List
-import json
+import os
+from datetime import datetime
 
 from .database import init_db
 from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
-
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, List[WebSocket]] = {}
-    
-    async def connect(self, websocket: WebSocket, raffle_id: int):
-        await websocket.accept()
-        if raffle_id not in self.active_connections:
-            self.active_connections[raffle_id] = []
-        self.active_connections[raffle_id].append(websocket)
-    
-    def disconnect(self, websocket: WebSocket, raffle_id: int):
-        if raffle_id in self.active_connections:
-            self.active_connections[raffle_id].remove(websocket)
-            if not self.active_connections[raffle_id]:
-                del self.active_connections[raffle_id]
-    
-    async def broadcast(self, message: dict, raffle_id: int):
-        if raffle_id in self.active_connections:
-            for connection in self.active_connections[raffle_id]:
-                try:
-                    await connection.send_json(message)
-                except:
-                    pass
-
-manager = ConnectionManager()
+from .websocket_manager import manager  # Импортируем из нового файла
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     # Start background task for checking raffles
-    asyncio.create_task(check_expired_raffles())
+    task = asyncio.create_task(check_expired_raffles())
     yield
     # Shutdown
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 
@@ -55,6 +35,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for uploads
+upload_dir = os.getenv("UPLOAD_DIR", "uploads")
+os.makedirs(upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
 # Include routers
 app.include_router(users.router, prefix="/api/users", tags=["users"])
@@ -75,6 +60,10 @@ async def check_expired_raffles():
 @app.get("/")
 async def root():
     return {"message": "Telegram Raffle API", "version": "1.0.0"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.utcnow()}
 
 # WebSocket endpoint for raffle wheel
 @app.websocket("/ws/raffle/{raffle_id}")
