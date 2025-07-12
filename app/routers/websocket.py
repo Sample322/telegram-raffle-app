@@ -7,9 +7,9 @@ import json
 from typing import List, Dict
 from datetime import datetime
 
-from ..database import get_db
+from ..database import get_db, async_session_maker
 from ..models import Raffle, Participant, User, Winner
-from ..main import manager
+from ..websocket_manager import manager  # Импортируем из нового файла
 
 router = APIRouter()
 
