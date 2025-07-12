@@ -10,7 +10,6 @@
     "axios": "^1.6.2",
     "socket.io-client": "^4.5.4",
     "react-countdown": "^2.3.5",
-    "react-wheel-of-prizes": "^1.0.9",
     "tailwindcss": "^3.3.6",
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
