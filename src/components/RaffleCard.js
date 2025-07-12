@@ -1,0 +1,118 @@
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import Countdown from 'react-countdown';
+import { CheckCircleIcon } from '@heroicons/react/24/solid';
+import api from '../services/api';
+
+const RaffleCard = ({ raffle }) => {
+  const [isParticipating, setIsParticipating] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    checkParticipation();
+  }, [raffle.id]);
+
+  const checkParticipation = async () => {
+    try {
+      const response = await api.get(`/raffles/${raffle.id}/check-participation`);
+      setIsParticipating(response.data.is_participating);
+    } catch (error) {
+      console.error('Error checking participation:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const CountdownRenderer = ({ days, hours, minutes, seconds, completed }) => {
+    if (completed) {
+      return <span className="text-red-500 font-semibold">Завершен</span>;
+    } else {
+      return (
+        <div className="flex space-x-2 text-sm">
+          <div className="text-center">
+            <div className="font-bold">{days}</div>
+            <div className="text-xs">дней</div>
+          </div>
+          <div className="text-center">
+            <div className="font-bold">{hours}</div>
+            <div className="text-xs">часов</div>
+          </div>
+          <div className="text-center">
+            <div className="font-bold">{minutes}</div>
+            <div className="text-xs">минут</div>
+          </div>
+          <div className="text-center">
+            <div className="font-bold">{seconds}</div>
+            <div className="text-xs">секунд</div>
+          </div>
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
+      {raffle.photo_url && (
+        <div className="h-48 overflow-hidden">
+          <img 
+            src={raffle.photo_url} 
+            alt={raffle.title}
+            className="w-full h-full object-cover"
+          />
+        </div>
+      )}
+      
+      <div className="p-4">
+        <h3 className="text-xl font-semibold text-gray-800 mb-2">{raffle.title}</h3>
+        
+        <div className="mb-3">
+          <p className="text-sm text-gray-600 mb-1">Призы:</p>
+          <div className="space-y-1">
+            {Object.entries(raffle.prizes).slice(0, 3).map(([position, prize]) => (
+              <div key={position} className="text-sm">
+                <span className="font-medium">{position} место:</span> {prize}
+              </div>
+            ))}
+            {Object.keys(raffle.prizes).length > 3 && (
+              <p className="text-sm text-gray-500 italic">
+                и еще {Object.keys(raffle.prizes).length - 3} приз(ов)...
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-sm text-gray-600">До окончания:</p>
+            <Countdown 
+              date={new Date(raffle.end_date)} 
+              renderer={CountdownRenderer}
+            />
+          </div>
+          <div className="text-right">
+            <p className="text-sm text-gray-600">Участников:</p>
+            <p className="text-lg font-semibold">{raffle.participants_count || 0}</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="h-10 bg-gray-200 animate-pulse rounded"></div>
+        ) : isParticipating ? (
+          <div className="flex items-center justify-center space-x-2 bg-green-100 text-green-700 py-2 px-4 rounded-lg">
+            <CheckCircleIcon className="h-5 w-5" />
+            <span className="font-medium">Вы участвуете</span>
+          </div>
+        ) : (
+          <Link 
+            to={`/raffle/${raffle.id}`}
+            className="block w-full text-center bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium"
+          >
+            Участвовать
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default RaffleCard;
