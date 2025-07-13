@@ -9,6 +9,7 @@ import csv
 import json
 import os
 from dotenv import load_dotenv
+import aiohttp
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, StateFilter
@@ -51,76 +52,98 @@ class RaffleStates(StatesGroup):
     waiting_description = State()
     waiting_photo = State()
     waiting_channels = State()
-    waiting_post_channel = State()     
+    waiting_prizes = State()
     waiting_end_datetime = State()
-    waiting_winners_count = State()
+    waiting_prize_details = State()
 
-class DatabaseManager:
-    """Класс для работы с базой данных"""
+class APIClient:
+    """Клиент для работы с API"""
     
-    def __init__(self, db_path: str = "/app/data/raffle_bot.db"):
+    def __init__(self, api_url: str):
+        self.api_url = api_url
+        self.session = None
+    
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+    
+    async def create_raffle(self, raffle_data: dict) -> dict:
+        """Создание розыгрыша через API"""
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.api_url}/api/admin/raffles"
+            
+            # Подготовка данных
+            api_data = {
+                "title": raffle_data['title'],
+                "description": raffle_data['description'],
+                "photo_url": raffle_data.get('photo_url', ''),
+                "channels": raffle_data['channels'].split() if raffle_data['channels'] else [],
+                "prizes": raffle_data['prizes'],
+                "end_date": raffle_data['end_date'].isoformat(),
+                "draw_delay_minutes": 5
+            }
+            
+            try:
+                async with session.post(url, json=api_data) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"API error {response.status}: {error_text}")
+            except aiohttp.ClientError as e:
+                logger.error(f"Network error: {e}")
+                raise Exception(f"Ошибка сети: {e}")
+    
+    async def get_active_raffles(self) -> List[dict]:
+        """Получение активных розыгрышей"""
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.api_url}/api/raffles/active"
+            try:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return []
+            except:
+                return []
+    
+    async def get_completed_raffles(self, limit: int = 10) -> List[dict]:
+        """Получение завершенных розыгрышей"""
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.api_url}/api/raffles/completed?limit={limit}"
+            try:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return []
+            except:
+                return []
+
+class LocalDatabaseManager:
+    """Локальная база для хранения пользователей и настроек"""
+    
+    def __init__(self, db_path: str = "/app/data/bot_users.db"):
         self.db_path = db_path
-        # Создаем директорию если её нет
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.init_database()
     
     def init_database(self):
-        """Инициализация базы данных"""
+        """Инициализация базы данных для пользователей"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Таблица пользователей
+            # Таблица пользователей бота
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS bot_users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
                     last_name TEXT,
                     notifications_enabled INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Таблица розыгрышей
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS raffles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    photo_file_id TEXT,
-                    channels TEXT,  -- JSON список каналов
-                    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    end_date TIMESTAMP,
-                    winners_count INTEGER DEFAULT 1,
-                    post_channel TEXT DEFAULT '',
-                    is_active INTEGER DEFAULT 1,
-                    is_completed INTEGER DEFAULT 0,
-                    result_message TEXT  -- Сообщение с результатами
-                )
-            ''')
-            
-            # Таблица участников розыгрышей
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS participants (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    raffle_id INTEGER,
-                    user_id INTEGER,
-                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (raffle_id) REFERENCES raffles (id),
-                    FOREIGN KEY (user_id) REFERENCES users (user_id),
-                    UNIQUE(raffle_id, user_id)
-                )
-            ''')
-            
-            # Таблица победителей
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS winners (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    raffle_id INTEGER,
-                    user_id INTEGER,
-                    won_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (raffle_id) REFERENCES raffles (id),
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
                 )
             ''')
             
@@ -131,7 +154,7 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
+                INSERT OR REPLACE INTO bot_users (user_id, username, first_name, last_name)
                 VALUES (?, ?, ?, ?)
             ''', (user_id, username, first_name, last_name))
             conn.commit()
@@ -140,11 +163,11 @@ class DatabaseManager:
         """Переключение уведомлений для пользователя"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT notifications_enabled FROM users WHERE user_id = ?', (user_id,))
+            cursor.execute('SELECT notifications_enabled FROM bot_users WHERE user_id = ?', (user_id,))
             result = cursor.fetchone()
             
             new_status = 0 if result and result[0] else 1
-            cursor.execute('UPDATE users SET notifications_enabled = ? WHERE user_id = ?', (new_status, user_id))
+            cursor.execute('UPDATE bot_users SET notifications_enabled = ? WHERE user_id = ?', (new_status, user_id))
             conn.commit()
             
             return bool(new_status)
@@ -153,121 +176,12 @@ class DatabaseManager:
         """Получение списка пользователей с включенными уведомлениями"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM users WHERE notifications_enabled = 1')
+            cursor.execute('SELECT user_id FROM bot_users WHERE notifications_enabled = 1')
             return [row[0] for row in cursor.fetchall()]
-    
-    def create_raffle(self, title: str, description: str, photo_file_id: str, 
-                     channels: str, end_date: datetime, winners_count: int) -> int:
-        """Создание нового розыгрыша"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO raffles (title, description, photo_file_id, channels, end_date, winners_count)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (title, description, photo_file_id, channels, end_date, winners_count))
-            conn.commit()
-            return cursor.lastrowid
-    
-    def get_active_raffle(self) -> Dict[str, Any]:
-        """Получение активного розыгрыша"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM raffles WHERE is_active = 1 AND is_completed = 0 ORDER BY id DESC LIMIT 1')
-            row = cursor.fetchone()
-            return dict(row) if row else None
-    
-    def get_expired_raffles(self) -> List[Dict[str, Any]]:
-        """Получение розыгрышей, которые пора завершить"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM raffles 
-                WHERE is_active = 1 
-                AND is_completed = 0 
-                AND datetime(end_date) <= datetime('now', 'localtime')
-            ''')
-            return [dict(row) for row in cursor.fetchall()]
-    
-    def add_participant(self, raffle_id: int, user_id: int) -> bool:
-        """Добавление участника в розыгрыш"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('INSERT INTO participants (raffle_id, user_id) VALUES (?, ?)', (raffle_id, user_id))
-                conn.commit()
-                return True
-        except sqlite3.IntegrityError:
-            return False  # Пользователь уже участвует
-    
-    def get_participants(self, raffle_id: int) -> List[Dict[str, Any]]:
-        """Получение списка участников розыгрыша"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT u.user_id, u.username, u.first_name, u.last_name
-                FROM participants p
-                JOIN users u ON p.user_id = u.user_id
-                WHERE p.raffle_id = ?
-            ''', (raffle_id,))
-            return [dict(row) for row in cursor.fetchall()]
-    
-    def get_participant_ids(self, raffle_id: int) -> List[int]:
-        """Получение списка ID участников розыгрыша"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM participants WHERE raffle_id = ?', (raffle_id,))
-            return [row[0] for row in cursor.fetchall()]
-    
-    def complete_raffle(self, raffle_id: int, winner_ids: List[int], result_message: str):
-        """Завершение розыгрыша и сохранение победителей"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Отмечаем розыгрыш как завершенный
-            cursor.execute(
-                'UPDATE raffles SET is_completed = 1, is_active = 0, result_message = ? WHERE id = ?', 
-                (result_message, raffle_id)
-            )
-            
-            # Сохраняем победителей
-            for winner_id in winner_ids:
-                cursor.execute('INSERT INTO winners (raffle_id, user_id) VALUES (?, ?)', (raffle_id, winner_id))
-            
-            conn.commit()
-    
-    def get_raffle_history(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Получение истории завершенных розыгрышей"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT r.*, 
-                       (SELECT COUNT(*) FROM participants WHERE raffle_id = r.id) as participants_count
-                FROM raffles r
-                WHERE r.is_completed = 1
-                ORDER BY r.end_date DESC
-                LIMIT ?
-            ''', (limit,))
-            return [dict(row) for row in cursor.fetchall()]
-    
-    def get_raffle_winners(self, raffle_id: int) -> List[Dict[str, Any]]:
-        """Получение победителей конкретного розыгрыша"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT u.user_id, u.username, u.first_name, u.last_name
-                FROM winners w
-                JOIN users u ON w.user_id = u.user_id
-                WHERE w.raffle_id = ?
-            ''', (raffle_id,))
-            return [dict(row) for row in cursor.fetchall()]
 
-# Создание экземпляра менеджера БД
-db = DatabaseManager()
+# Создание экземпляров
+db = LocalDatabaseManager()
+api_client = APIClient(API_URL)
 
 # Вспомогательные функции
 def create_main_keyboard():
@@ -290,10 +204,6 @@ def create_admin_keyboard():
             [KeyboardButton(text="📢 Получать уведомления")],
             [KeyboardButton(text="🎯 Активные розыгрыши")],
             [KeyboardButton(text="➕ Создать розыгрыш")],
-            [KeyboardButton(text="🏆 Завершить розыгрыш")],
-            [KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="📥 Экспорт участников")],
-            [KeyboardButton(text="🏅 Экспорт победителей")],
             [KeyboardButton(text="📜 История розыгрышей")],
             [KeyboardButton(text="ℹ️ Информация")]
         ],
@@ -301,89 +211,38 @@ def create_admin_keyboard():
     )
     return keyboard
 
-async def check_channel_subscription(user_id: int, channel_username: str) -> bool:
-    """Проверка подписки пользователя на канал"""
+async def upload_photo_to_api(photo_file_id: str) -> str:
+    """Загрузка фото на сервер через Telegram API"""
     try:
-        # Убираем @ если он есть
-        channel_username = channel_username.replace('@', '')
-        member = await bot.get_chat_member(f"@{channel_username}", user_id)
-        return member.status in ['creator', 'administrator', 'member']
+        # Получаем файл от Telegram
+        file = await bot.get_file(photo_file_id)
+        file_path = file.file_path
+        
+        # Скачиваем файл
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(file_url) as resp:
+                if resp.status == 200:
+                    file_data = await resp.read()
+                    
+                    # Загружаем на наш сервер
+                    form = aiohttp.FormData()
+                    form.add_field('file',
+                                 file_data,
+                                 filename='raffle_image.jpg',
+                                 content_type='image/jpeg')
+                    
+                    async with session.post(f"{API_URL}/api/admin/upload-image", data=form) as upload_resp:
+                        if upload_resp.status == 200:
+                            result = await upload_resp.json()
+                            return f"{API_URL}{result['url']}"
+        
+        # Если не удалось загрузить, возвращаем file_id
+        return photo_file_id
     except Exception as e:
-        logger.error(f"Ошибка проверки подписки: {e}")
-        return False
-
-def export_to_excel(data: List[Dict], filename: str, title: str):
-    """Экспорт данных в Excel файл"""
-    if not EXCEL_AVAILABLE:
-        # Если openpyxl не установлен, экспортируем в CSV
-        csv_filename = filename.replace('.xlsx', '.csv')
-        with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            if data:
-                fieldnames = data[0].keys()
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(data)
-        return csv_filename
-    
-    # Создаем Excel файл
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = title
-    
-    # Стили
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Заголовки
-    if data:
-        headers = list(data[0].keys())
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-        
-        # Данные
-        for row_idx, row_data in enumerate(data, 2):
-            for col_idx, (key, value) in enumerate(row_data.items(), 1):
-                ws.cell(row=row_idx, column=col_idx, value=value)
-        
-        # Автоширина колонок
-        for column in ws.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
-    
-    wb.save(filename)
-    return filename
-
-# Вспомогательная функция для отправки уведомлений
-async def send_notification_with_photo(user_id, text, photo_file_id, keyboard):
-    """Вспомогательная функция для отправки уведомлений"""
-    if photo_file_id:
-        await bot.send_photo(
-            chat_id=user_id,
-            photo=photo_file_id,
-            caption=text,
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-    else:
-        await bot.send_message(
-            chat_id=user_id,
-            text=text,
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-    await asyncio.sleep(0.05)
+        logger.error(f"Error uploading photo: {e}")
+        return photo_file_id
 
 # Обработчики команд
 @dp.message(Command("start"))
@@ -421,89 +280,92 @@ async def manage_notifications(message: types.Message):
 @dp.message(F.text == "🎯 Активные розыгрыши")
 async def show_active_raffles(message: types.Message):
     """Показ активных розыгрышей"""
-    raffle = db.get_active_raffle()
-    
-    if not raffle:
-        await message.answer("😔 Сейчас нет активных розыгрышей. Следите за обновлениями!")
-        return
-    
-    # Форматируем дату окончания
-    end_date = datetime.fromisoformat(raffle['end_date'])
-    end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
-    
-    # Создаем кнопку для участия с Web App
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🎯 Участвовать", 
-            web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle['id']}")
-        )]
-    ])
-    
-    # Считаем участников
-    participants_count = len(db.get_participants(raffle['id']))
-    
-    caption = (
-        f"🎉 **{raffle['title']}**\n\n"
-        f"{raffle['description']}\n\n"
-        f"⏰ Завершится: {end_date_str}\n"
-        f"👥 Участников: {participants_count}\n"
-        f"🏆 Победителей будет: {raffle['winners_count']}"
-    )
-    
-    if raffle['photo_file_id']:
-        await message.answer_photo(
-            photo=raffle['photo_file_id'],
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode="Markdown"
+    try:
+        raffles = await api_client.get_active_raffles()
+        
+        if not raffles:
+            await message.answer("😔 Сейчас нет активных розыгрышей. Следите за обновлениями!")
+            return
+        
+        # Показываем первый активный розыгрыш
+        raffle = raffles[0]
+        
+        # Форматируем дату окончания
+        end_date = datetime.fromisoformat(raffle['end_date'].replace('Z', '+00:00'))
+        end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
+        
+        # Создаем кнопку для участия с Web App
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🎯 Участвовать", 
+                web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle['id']}")
+            )]
+        ])
+        
+        # Форматируем призы
+        prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle.get('prizes', {}).items()])
+        
+        caption = (
+            f"🎉 **{raffle['title']}**\n\n"
+            f"{raffle['description']}\n\n"
+            f"🏆 **Призы:**\n{prizes_text}\n\n"
+            f"⏰ Завершится: {end_date_str}\n"
+            f"👥 Участников: {raffle.get('participants_count', 0)}"
         )
-    else:
-        await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
+        
+        if raffle.get('photo_url'):
+            await message.answer_photo(
+                photo=raffle['photo_url'],
+                caption=caption,
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"Error showing active raffles: {e}")
+        await message.answer("Произошла ошибка при загрузке розыгрышей. Попробуйте позже.")
 
 @dp.message(F.text == "📜 История розыгрышей")
 async def show_history(message: types.Message):
-    """Показ истории розыгрышей для всех пользователей"""
-    history = db.get_raffle_history(limit=10)
-    
-    if not history:
-        await message.answer("📜 История розыгрышей пуста")
-        return
-    
-    history_text = "📜 **История последних розыгрышей:**\n\n"
-    
-    for raffle in history:
-        # Получаем победителей
-        winners = db.get_raffle_winners(raffle['id'])
+    """Показ истории розыгрышей"""
+    try:
+        history = await api_client.get_completed_raffles(limit=10)
         
-        # Форматируем дату
-        end_date = datetime.fromisoformat(raffle['end_date'])
-        date_str = end_date.strftime("%d.%m.%Y")
+        if not history:
+            await message.answer("📜 История розыгрышей пуста")
+            return
         
-        history_text += f"🎯 **{raffle['title']}**\n"
-        history_text += f"📅 Завершен: {date_str}\n"
-        history_text += f"👥 Участников: {raffle['participants_count']}\n"
+        history_text = "📜 **История последних розыгрышей:**\n\n"
         
-        if raffle['result_message']:
-            # Используем сохраненное сообщение с результатами
-            lines = raffle['result_message'].split('\n')
-            # Ищем строки с победителями
-            in_winners_section = False
-            for line in lines:
-                if "Победители:" in line or "победители:" in line:
-                    in_winners_section = True
-                    continue
-                if in_winners_section and line.strip() and not line.startswith("Поздравляем"):
-                    history_text += f"🏆 {line.strip()}\n"
-                elif in_winners_section and (line.startswith("Поздравляем") or not line.strip()):
-                    break
+        for raffle in history:
+            # Форматируем дату
+            end_date = datetime.fromisoformat(raffle['end_date'].replace('Z', '+00:00'))
+            date_str = end_date.strftime("%d.%m.%Y")
+            
+            history_text += f"🎯 **{raffle['title']}**\n"
+            history_text += f"📅 Завершен: {date_str}\n"
+            history_text += f"👥 Участников: {raffle.get('participants_count', 0)}\n"
+            
+            # Показываем победителей
+            if raffle.get('winners'):
+                for winner in raffle['winners'][:3]:  # Показываем первых 3
+                    history_text += f"🏆 {winner['position']} место: @{winner['user']['username'] or winner['user']['first_name']}\n"
+                if len(raffle['winners']) > 3:
+                    history_text += f"... и еще {len(raffle['winners']) - 3} победителей\n"
+            
+            history_text += "─" * 30 + "\n\n"
         
-        history_text += "─" * 30 + "\n\n"
-    
-    # Telegram имеет лимит в 4096 символов
-    if len(history_text) > 4000:
-        history_text = history_text[:4000] + "\n\n... (показаны последние розыгрыши)"
-    
-    await message.answer(history_text, parse_mode="Markdown")
+        # Telegram имеет лимит в 4096 символов
+        if len(history_text) > 4000:
+            history_text = history_text[:4000] + "\n\n... (показаны последние розыгрыши)"
+        
+        await message.answer(history_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error showing history: {e}")
+        await message.answer("Произошла ошибка при загрузке истории. Попробуйте позже.")
 
 @dp.message(F.text == "ℹ️ Информация")
 async def show_info(message: types.Message):
@@ -554,9 +416,11 @@ async def process_description(message: types.Message, state: FSMContext):
 async def process_photo(message: types.Message, state: FSMContext):
     """Обработка фото розыгрыша"""
     if message.photo:
-        await state.update_data(photo_file_id=message.photo[-1].file_id)
+        # Загружаем фото на сервер
+        photo_url = await upload_photo_to_api(message.photo[-1].file_id)
+        await state.update_data(photo_url=photo_url)
     elif message.text and message.text.lower() == 'пропустить':
-        await state.update_data(photo_file_id=None)
+        await state.update_data(photo_url='')
     else:
         await message.answer("Пожалуйста, отправьте фото или напишите 'пропустить'")
         return
@@ -577,27 +441,50 @@ async def process_channels(message: types.Message, state: FSMContext):
         channels = message.text.strip()
         await state.update_data(channels=channels)
     
-    await state.set_state(RaffleStates.waiting_post_channel)
+    await state.set_state(RaffleStates.waiting_prizes)
     await message.answer(
-        "Шаг 5/7: Укажите @канал, куда опубликовать розыгрыш\n"
-        "(или напишите 'пропустить')"
+        "Шаг 5/6: Введите количество призовых мест:"
     )
 
-@dp.message(RaffleStates.waiting_post_channel)
-async def process_post_channel(message: types.Message, state: FSMContext):
-    text = message.text.strip()
-    if text.lower() == 'пропустить':
-        await state.update_data(post_channel='')
+@dp.message(RaffleStates.waiting_prizes)
+async def process_prizes_count(message: types.Message, state: FSMContext):
+    """Обработка количества призов"""
+    try:
+        prizes_count = int(message.text)
+        if prizes_count < 1:
+            raise ValueError
+        
+        await state.update_data(prizes_count=prizes_count, prizes={}, current_prize=1)
+        await state.set_state(RaffleStates.waiting_prize_details)
+        await message.answer(f"Введите приз для 1 места:")
+        
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число призовых мест (минимум 1)")
+
+@dp.message(RaffleStates.waiting_prize_details)
+async def process_prize_details(message: types.Message, state: FSMContext):
+    """Обработка деталей призов"""
+    data = await state.get_data()
+    current_prize = data['current_prize']
+    prizes = data['prizes']
+    prizes_count = data['prizes_count']
+    
+    # Сохраняем текущий приз
+    prizes[str(current_prize)] = message.text
+    
+    if current_prize < prizes_count:
+        # Еще есть призы для ввода
+        await state.update_data(prizes=prizes, current_prize=current_prize + 1)
+        await message.answer(f"Введите приз для {current_prize + 1} места:")
     else:
-        if not text.startswith('@'):
-            await message.answer("Канал должен начинаться с @. Попробуйте ещё раз:")
-            return
-        await state.update_data(post_channel=text)
-    await state.set_state(RaffleStates.waiting_end_datetime)
-    await message.answer(
-        "Шаг 6/7: Введите дату и время окончания розыгрыша\n"
-        "Формат: ДД.ММ.ГГГГ ЧЧ:ММ"
-    )
+        # Все призы введены
+        await state.update_data(prizes=prizes)
+        await state.set_state(RaffleStates.waiting_end_datetime)
+        await message.answer(
+            "Шаг 6/6: Введите дату и время окончания розыгрыша\n\n"
+            "Формат: ДД.ММ.ГГГГ ЧЧ:ММ\n"
+            "Например: 25.12.2024 18:00"
+        )
 
 @dp.message(RaffleStates.waiting_end_datetime)
 async def process_end_datetime(message: types.Message, state: FSMContext):
@@ -611,9 +498,41 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
             await message.answer("❌ Дата должна быть в будущем! Попробуйте еще раз:")
             return
         
-        await state.update_data(end_date=end_date)
-        await state.set_state(RaffleStates.waiting_winners_count)
-        await message.answer("Шаг 7/7: Введите количество победителей:")
+        # Получаем все данные
+        data = await state.get_data()
+        data['end_date'] = end_date
+        
+        # Создаем розыгрыш через API
+        loading_msg = await message.answer("⏳ Создаю розыгрыш...")
+        
+        try:
+            raffle = await api_client.create_raffle(data)
+            
+            await loading_msg.delete()
+            await state.clear()
+            
+            keyboard = create_admin_keyboard()
+            await message.answer(
+                "✅ Розыгрыш успешно создан!\n\n"
+                f"📋 Название: {data['title']}\n"
+                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')}\n"
+                f"🏆 Призовых мест: {data['prizes_count']}\n\n"
+                "⏰ Результаты будут подведены автоматически!\n\n"
+                "Сейчас начнется рассылка уведомлений...",
+                reply_markup=keyboard
+            )
+            
+            # Отправляем уведомления
+            await send_raffle_notification(raffle['id'], data)
+            
+        except Exception as e:
+            await loading_msg.delete()
+            await message.answer(
+                f"❌ Ошибка при создании розыгрыша: {str(e)}\n\n"
+                "Попробуйте еще раз или обратитесь к разработчику.",
+                reply_markup=create_admin_keyboard()
+            )
+            await state.clear()
         
     except ValueError:
         await message.answer(
@@ -622,52 +541,8 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
             "Например: 25.12.2024 18:00"
         )
 
-@dp.message(RaffleStates.waiting_winners_count)
-async def process_winners_count(message: types.Message, state: FSMContext):
-    """Обработка количества победителей и создание розыгрыша"""
-    try:
-        winners_count = int(message.text)
-        if winners_count < 1:
-            raise ValueError
-        
-        # Получаем все данные
-        data = await state.get_data()
-        
-        # Создаем розыгрыш в БД
-        raffle_id = db.create_raffle(
-            title=data['title'],
-            description=data['description'],
-            photo_file_id=data['photo_file_id'],
-            channels=data['channels'],
-            end_date=data['end_date'],
-            winners_count=winners_count
-        )
-        
-        await state.clear()
-        
-        keyboard = create_admin_keyboard()
-        await message.answer(
-            "✅ Розыгрыш успешно создан!\n\n"
-            f"📋 Название: {data['title']}\n"
-            f"📅 Завершится: {data['end_date'].strftime('%d.%m.%Y в %H:%M')}\n"
-            f"🏆 Победителей: {winners_count}\n\n"
-            "⏰ Результаты будут подведены автоматически!\n\n"
-            "Сейчас начнется рассылка уведомлений...",
-            reply_markup=keyboard
-        )
-        
-        # Отправляем уведомления
-        await send_raffle_notification(raffle_id)
-        
-    except ValueError:
-        await message.answer("Пожалуйста, введите корректное число победителей (минимум 1)")
-
-async def send_raffle_notification(raffle_id: int):
+async def send_raffle_notification(raffle_id: int, raffle_data: dict):
     """Отправка уведомлений о новом розыгрыше"""
-    raffle = db.get_active_raffle()
-    if not raffle:
-        return
-    
     users = db.get_users_with_notifications()
     
     # Кнопка с Web App для участия
@@ -678,23 +553,37 @@ async def send_raffle_notification(raffle_id: int):
         )]
     ])
     
-    # Форматируем дату окончания
-    end_date = datetime.fromisoformat(raffle['end_date'])
-    end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
+    # Форматируем призы
+    prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle_data['prizes'].items()])
     
     caption = (
         f"🎉 **Новый розыгрыш!**\n\n"
-        f"**{raffle['title']}**\n\n"
-        f"{raffle['description']}\n\n"
-        f"⏰ Итоги будут подведены: {end_date_str}\n"
-        f"🏆 Количество победителей: {raffle['winners_count']}"
+        f"**{raffle_data['title']}**\n\n"
+        f"{raffle_data['description']}\n\n"
+        f"🏆 **Призы:**\n{prizes_text}\n\n"
+        f"⏰ До {raffle_data['end_date'].strftime('%d.%m.%Y в %H:%M')}"
     )
     
     success_count = 0
     for user_id in users:
         try:
-            await send_notification_with_photo(user_id, caption, raffle.get('photo_file_id'), keyboard)
+            if raffle_data.get('photo_url'):
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=raffle_data['photo_url'],
+                    caption=caption,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=caption,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
             success_count += 1
+            await asyncio.sleep(0.05)
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
     
@@ -709,304 +598,9 @@ async def send_raffle_notification(raffle_id: int):
         except:
             pass
 
-async def notify_raffle_live(raffle_id: int):
-    """Уведомление о начале live розыгрыша"""
-    raffle = db.get_active_raffle()
-    if not raffle:
-        return
-    
-    participants = db.get_participant_ids(raffle_id)
-    notif_users = db.get_users_with_notifications()
-    all_users = list(set(participants + notif_users))
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🎰 Смотреть розыгрыш",
-            web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle_id}/live")
-        )]
-    ])
-    
-    text = (
-        f"🎰 **Розыгрыш начался!**\n\n"
-        f"**{raffle['title']}**\n\n"
-        f"Нажмите кнопку ниже, чтобы посмотреть live-розыгрыш!"
-    )
-    
-    for user_id in all_users:
-        try:
-            await send_notification_with_photo(user_id, text, raffle.get('photo_file_id'), keyboard)
-        except Exception as e:
-            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
-
-@dp.callback_query(F.data.startswith("join_"))
-async def process_join_raffle(callback: types.CallbackQuery):
-    """Обработка участия в розыгрыше (для обратной совместимости)"""
-    raffle_id = int(callback.data.split("_")[1])
-    
-    # Открываем Web App для участия
-    await callback.answer(
-        "Нажмите кнопку 'Участвовать' в сообщении выше, чтобы открыть приложение",
-        show_alert=True
-    )
-
-@dp.message(F.text == "🏆 Завершить розыгрыш", F.from_user.id.in_(ADMIN_IDS))
-async def complete_raffle_manual(message: types.Message):
-    """Ручное завершение активного розыгрыша"""
-    raffle = db.get_active_raffle()
-    
-    if not raffle:
-        await message.answer("Нет активных розыгрышей для завершения!")
-        return
-    
-    await complete_raffle(raffle)
-    await message.answer("✅ Розыгрыш успешно завершен!")
-
-async def complete_raffle(raffle: Dict[str, Any]):
-    """Завершение розыгрыша и отправка результатов"""
-    participants = db.get_participants(raffle['id'])
-    
-    if len(participants) < raffle['winners_count']:
-        # Недостаточно участников — шлём админам и отключаем розыгрыш навсегда
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Розыгрыш '{raffle['title']}' не может быть завершен!\n"
-                    f"Участников: {len(participants)}\n"
-                    f"Требуется победителей: {raffle['winners_count']}"
-                )
-            except:
-                pass
-        # Отключаем этот розыгрыш, чтобы не автозавершать его снова
-        with sqlite3.connect(db.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE raffles SET is_active = 0 WHERE id = ?", (raffle['id'],))
-            conn.commit()
-        return
-    
-    # Уведомляем о начале розыгрыша
-    await notify_raffle_live(raffle['id'])
-    
-    # Выбираем победителей
-    winners = random.sample(participants, raffle['winners_count'])
-    winner_ids = [w['user_id'] for w in winners]
-    
-    # Формируем список победителей
-    winners_text = "\n".join([
-        f"{i+1}. {w['first_name']} {w['last_name'] or ''} (@{w['username'] or 'без username'})"
-        for i, w in enumerate(winners)
-    ])
-    
-    # Формируем сообщение с результатами
-    result_text = (
-        f"🏆 **Розыгрыш завершен!**\n\n"
-        f"**{raffle['title']}**\n\n"
-        f"🎉 **Победители:**\n{winners_text}\n\n"
-        f"Поздравляем победителей! 🎊"
-    )
-    
-    # Сохраняем результаты в БД
-    db.complete_raffle(raffle['id'], winner_ids, result_text)
-    
-    # Получаем всех участников розыгрыша
-    participant_ids = db.get_participant_ids(raffle['id'])
-    
-    # Отправляем результаты всем участникам
-    for user_id in participant_ids:
-        try:
-            if raffle['photo_file_id']:
-                await bot.send_photo(
-                    chat_id=user_id,
-                    photo=raffle['photo_file_id'],
-                    caption=result_text,
-                    parse_mode="Markdown"
-                )
-            else:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=result_text,
-                    parse_mode="Markdown"
-                )
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.error(f"Ошибка отправки результатов пользователю {user_id}: {e}")
-    
-    # Уведомляем админов
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                f"✅ Розыгрыш '{raffle['title']}' завершен!\n"
-                f"Участников: {len(participants)}\n"
-                f"Победителей: {len(winners)}\n"
-                f"Уведомления отправлены всем участникам!"
-            )
-        except:
-            pass
-
-@dp.message(F.text == "📊 Статистика", F.from_user.id.in_(ADMIN_IDS))
-async def show_statistics(message: types.Message):
-    """Показ статистики для администраторов"""
-    with sqlite3.connect(db.db_path) as conn:
-        cursor = conn.cursor()
-        
-        # Общее количество пользователей
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-        
-        # Пользователи с уведомлениями
-        cursor.execute("SELECT COUNT(*) FROM users WHERE notifications_enabled = 1")
-        notif_users = cursor.fetchone()[0]
-        
-        # Количество розыгрышей
-        cursor.execute("SELECT COUNT(*) FROM raffles")
-        total_raffles = cursor.fetchone()[0]
-        
-        # Активные розыгрыши
-        cursor.execute("SELECT COUNT(*) FROM raffles WHERE is_active = 1")
-        active_raffles = cursor.fetchone()[0]
-        
-        # Текущие участники
-        raffle = db.get_active_raffle()
-        current_participants = len(db.get_participants(raffle['id'])) if raffle else 0
-    
-    await message.answer(
-        f"📊 **Статистика бота**\n\n"
-        f"👥 Всего пользователей: {total_users}\n"
-        f"🔔 С уведомлениями: {notif_users}\n"
-        f"🎯 Всего розыгрышей: {total_raffles}\n"
-        f"✅ Активных: {active_raffles}\n"
-        f"👤 Участников в текущем: {current_participants}",
-        parse_mode="Markdown"
-    )
-
-@dp.message(F.text == "📥 Экспорт участников", F.from_user.id.in_(ADMIN_IDS))
-async def export_participants(message: types.Message):
-    """Экспорт списка участников текущего розыгрыша"""
-    raffle = db.get_active_raffle()
-    
-    if not raffle:
-        await message.answer("Нет активных розыгрышей!")
-        return
-    
-    participants = db.get_participants(raffle['id'])
-    
-    if not participants:
-        await message.answer("В розыгрыше пока нет участников!")
-        return
-    
-    # Подготавливаем данные для экспорта
-    export_data = []
-    for p in participants:
-        export_data.append({
-            'ID': p['user_id'],
-            'Username': p['username'] or 'Нет',
-            'Имя': p['first_name'],
-            'Фамилия': p['last_name'] or ''
-        })
-    
-    # Экспортируем в файл
-    filename = f"participants_{raffle['id']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    if EXCEL_AVAILABLE:
-        filename += ".xlsx"
-    else:
-        filename += ".csv"
-    
-    exported_file = export_to_excel(export_data, filename, f"Участники - {raffle['title']}")
-    
-    # Отправляем файл
-    with open(exported_file, 'rb') as f:
-        await message.answer_document(
-            document=types.input_file.FSInputFile(exported_file),
-            caption=f"📊 Список участников розыгрыша:\n**{raffle['title']}**\n\nВсего: {len(participants)} чел."
-        )
-    
-    # Удаляем временный файл
-    os.remove(exported_file)
-
-@dp.message(F.text == "🏅 Экспорт победителей", F.from_user.id.in_(ADMIN_IDS))
-async def export_winners(message: types.Message):
-    """Экспорт списка всех победителей"""
-    with sqlite3.connect(db.db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT 
-                r.title as raffle_title,
-                r.end_date,
-                u.user_id,
-                u.username,
-                u.first_name,
-                u.last_name,
-                w.won_at
-            FROM winners w
-            JOIN users u ON w.user_id = u.user_id
-            JOIN raffles r ON w.raffle_id = r.id
-            ORDER BY w.won_at DESC
-        ''')
-        winners_data = cursor.fetchall()
-    
-    if not winners_data:
-        await message.answer("Пока нет победителей в завершенных розыгрышах!")
-        return
-    
-    # Подготавливаем данные для экспорта
-    export_data = []
-    for w in winners_data:
-        export_data.append({
-            'Розыгрыш': w['raffle_title'],
-            'Дата розыгрыша': w['end_date'][:10],
-            'ID победителя': w['user_id'],
-            'Username': w['username'] or 'Нет',
-            'Имя': w['first_name'],
-            'Фамилия': w['last_name'] or '',
-            'Дата победы': w['won_at'][:10]
-        })
-    
-    # Экспортируем в файл
-    filename = f"winners_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    if EXCEL_AVAILABLE:
-        filename += ".xlsx"
-    else:
-        filename += ".csv"
-    
-    exported_file = export_to_excel(export_data, filename, "Все победители")
-    
-    # Отправляем файл
-    with open(exported_file, 'rb') as f:
-        await message.answer_document(
-            document=types.input_file.FSInputFile(exported_file),
-            caption=f"🏅 Список всех победителей\n\nВсего победителей: {len(export_data)}"
-        )
-    
-    # Удаляем временный файл
-    os.remove(exported_file)
-
-# Автоматическая проверка и завершение розыгрышей
-async def check_and_complete_raffles():
-    """Проверка и автоматическое завершение розыгрышей по времени"""
-    while True:
-        try:
-            # Получаем розыгрыши, которые пора завершить
-            expired_raffles = db.get_expired_raffles()
-            
-            for raffle in expired_raffles:
-                logger.info(f"Автозавершение розыгрыша: {raffle['title']}")
-                await complete_raffle(raffle)
-                await asyncio.sleep(1)  # Небольшая пауза между розыгрышами
-        
-        except Exception as e:
-            logger.error(f"Ошибка в автозавершении розыгрышей: {e}")
-        
-        # Проверяем каждую минуту
-        await asyncio.sleep(60)
-
 async def main():
     """Основная функция запуска бота"""
     logger.info("Запуск бота...")
-    
-    # Запускаем фоновую задачу для автозавершения розыгрышей
-    asyncio.create_task(check_and_complete_raffles())
     
     # Запускаем polling
     await dp.start_polling(bot)
