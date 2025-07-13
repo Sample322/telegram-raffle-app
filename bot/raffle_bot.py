@@ -34,7 +34,7 @@ except ImportError:
 
 # Настройки бота
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8056583131:AAH9qRCnWHcFKBkpmjTRk_zVGlHjCOx58Fs")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://raffle-app.onrender.com")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://raffle-app-qtma.onrender.com")
 API_URL = os.getenv("API_URL", "https://raffle-api.onrender.com")
 ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "888007035").split(",")]
 
@@ -53,97 +53,142 @@ class RaffleStates(StatesGroup):
     waiting_photo = State()
     waiting_channels = State()
     waiting_prizes = State()
-    waiting_end_datetime = State()
     waiting_prize_details = State()
+    waiting_end_datetime = State()
 
 class APIClient:
     """Клиент для работы с API"""
     
     def __init__(self, api_url: str):
         self.api_url = api_url
-        self.session = None
-    
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.session:
-            await self.session.close()
     
     async def create_raffle(self, raffle_data: dict) -> dict:
         """Создание розыгрыша через API"""
         async with aiohttp.ClientSession() as session:
-            url = f"{self.api_url}/api/admin/raffles"
+            url = f"{self.api_url}/api/raffles"  # Изменен endpoint
             
-            # Подготовка данных
+            # Подготовка данных для API
             api_data = {
                 "title": raffle_data['title'],
                 "description": raffle_data['description'],
                 "photo_url": raffle_data.get('photo_url', ''),
-                "channels": raffle_data['channels'].split() if raffle_data['channels'] else [],
-                "prizes": raffle_data['prizes'],
+                "channels": raffle_data['channels'].split() if raffle_data.get('channels') else [],
+                "prizes": raffle_data.get('prizes', {}),
                 "end_date": raffle_data['end_date'].isoformat(),
                 "draw_delay_minutes": 5
             }
             
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
             try:
-                async with session.post(url, json=api_data) as response:
-                    if response.status == 200:
+                logger.info(f"Sending request to {url} with data: {api_data}")
+                async with session.post(url, json=api_data, headers=headers, ssl=False) as response:
+                    response_text = await response.text()
+                    logger.info(f"Response status: {response.status}, text: {response_text}")
+                    
+                    if response.status == 200 or response.status == 201:
                         return await response.json()
                     else:
-                        error_text = await response.text()
-                        raise Exception(f"API error {response.status}: {error_text}")
+                        raise Exception(f"API error {response.status}: {response_text}")
             except aiohttp.ClientError as e:
                 logger.error(f"Network error: {e}")
                 raise Exception(f"Ошибка сети: {e}")
     
     async def get_active_raffles(self) -> List[dict]:
-        """Получение активных розыгрышей"""
+        """Получение активных розыгрышей из API"""
         async with aiohttp.ClientSession() as session:
             url = f"{self.api_url}/api/raffles/active"
             try:
-                async with session.get(url) as response:
+                async with session.get(url, ssl=False) as response:
                     if response.status == 200:
                         return await response.json()
                     return []
-            except:
+            except Exception as e:
+                logger.error(f"Error getting active raffles: {e}")
                 return []
     
     async def get_completed_raffles(self, limit: int = 10) -> List[dict]:
-        """Получение завершенных розыгрышей"""
+        """Получение завершенных розыгрышей из API"""
         async with aiohttp.ClientSession() as session:
             url = f"{self.api_url}/api/raffles/completed?limit={limit}"
             try:
-                async with session.get(url) as response:
+                async with session.get(url, ssl=False) as response:
                     if response.status == 200:
                         return await response.json()
                     return []
-            except:
+            except Exception as e:
+                logger.error(f"Error getting completed raffles: {e}")
                 return []
 
-class LocalDatabaseManager:
-    """Локальная база для хранения пользователей и настроек"""
+class DatabaseManager:
+    """Класс для работы с локальной базой данных"""
     
-    def __init__(self, db_path: str = "/app/data/bot_users.db"):
+    def __init__(self, db_path: str = "/app/data/raffle_bot.db"):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.init_database()
     
     def init_database(self):
-        """Инициализация базы данных для пользователей"""
+        """Инициализация базы данных"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Таблица пользователей бота
+            # Таблица пользователей
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS bot_users (
+                CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
                     last_name TEXT,
                     notifications_enabled INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Таблица розыгрышей (для локального кеша)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS raffles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_id INTEGER,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    photo_file_id TEXT,
+                    photo_url TEXT,
+                    channels TEXT,
+                    prizes TEXT,
+                    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    end_date TIMESTAMP,
+                    winners_count INTEGER DEFAULT 1,
+                    is_active INTEGER DEFAULT 1,
+                    is_completed INTEGER DEFAULT 0,
+                    result_message TEXT
+                )
+            ''')
+            
+            # Таблица участников розыгрышей
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS participants (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raffle_id INTEGER,
+                    user_id INTEGER,
+                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (raffle_id) REFERENCES raffles (id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    UNIQUE(raffle_id, user_id)
+                )
+            ''')
+            
+            # Таблица победителей
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS winners (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raffle_id INTEGER,
+                    user_id INTEGER,
+                    won_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (raffle_id) REFERENCES raffles (id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
                 )
             ''')
             
@@ -154,7 +199,7 @@ class LocalDatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO bot_users (user_id, username, first_name, last_name)
+                INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
                 VALUES (?, ?, ?, ?)
             ''', (user_id, username, first_name, last_name))
             conn.commit()
@@ -163,11 +208,11 @@ class LocalDatabaseManager:
         """Переключение уведомлений для пользователя"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT notifications_enabled FROM bot_users WHERE user_id = ?', (user_id,))
+            cursor.execute('SELECT notifications_enabled FROM users WHERE user_id = ?', (user_id,))
             result = cursor.fetchone()
             
             new_status = 0 if result and result[0] else 1
-            cursor.execute('UPDATE bot_users SET notifications_enabled = ? WHERE user_id = ?', (new_status, user_id))
+            cursor.execute('UPDATE users SET notifications_enabled = ? WHERE user_id = ?', (new_status, user_id))
             conn.commit()
             
             return bool(new_status)
@@ -176,11 +221,42 @@ class LocalDatabaseManager:
         """Получение списка пользователей с включенными уведомлениями"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM bot_users WHERE notifications_enabled = 1')
+            cursor.execute('SELECT user_id FROM users WHERE notifications_enabled = 1')
             return [row[0] for row in cursor.fetchall()]
+    
+    def create_raffle_cache(self, api_id: int, title: str, description: str, photo_file_id: str, 
+                          photo_url: str, channels: str, prizes: dict, end_date: datetime) -> int:
+        """Создание локальной копии розыгрыша"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO raffles (api_id, title, description, photo_file_id, photo_url, channels, prizes, end_date, winners_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (api_id, title, description, photo_file_id, photo_url, channels, 
+                  json.dumps(prizes), end_date, len(prizes)))
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_active_raffle(self) -> Dict[str, Any]:
+        """Получение активного розыгрыша из локального кеша"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM raffles WHERE is_active = 1 AND is_completed = 0 ORDER BY id DESC LIMIT 1')
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                # Преобразуем prizes из JSON строки в словарь
+                if result.get('prizes'):
+                    try:
+                        result['prizes'] = json.loads(result['prizes'])
+                    except:
+                        result['prizes'] = {}
+                return result
+            return None
 
 # Создание экземпляров
-db = LocalDatabaseManager()
+db = DatabaseManager()
 api_client = APIClient(API_URL)
 
 # Вспомогательные функции
@@ -212,37 +288,9 @@ def create_admin_keyboard():
     return keyboard
 
 async def upload_photo_to_api(photo_file_id: str) -> str:
-    """Загрузка фото на сервер через Telegram API"""
-    try:
-        # Получаем файл от Telegram
-        file = await bot.get_file(photo_file_id)
-        file_path = file.file_path
-        
-        # Скачиваем файл
-        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                if resp.status == 200:
-                    file_data = await resp.read()
-                    
-                    # Загружаем на наш сервер
-                    form = aiohttp.FormData()
-                    form.add_field('file',
-                                 file_data,
-                                 filename='raffle_image.jpg',
-                                 content_type='image/jpeg')
-                    
-                    async with session.post(f"{API_URL}/api/admin/upload-image", data=form) as upload_resp:
-                        if upload_resp.status == 200:
-                            result = await upload_resp.json()
-                            return f"{API_URL}{result['url']}"
-        
-        # Если не удалось загрузить, возвращаем file_id
-        return photo_file_id
-    except Exception as e:
-        logger.error(f"Error uploading photo: {e}")
-        return photo_file_id
+    """Загрузка фото на сервер (возвращает file_id как URL)"""
+    # Пока возвращаем file_id, так как API может не поддерживать загрузку
+    return photo_file_id
 
 # Обработчики команд
 @dp.message(Command("start"))
@@ -281,51 +329,95 @@ async def manage_notifications(message: types.Message):
 async def show_active_raffles(message: types.Message):
     """Показ активных розыгрышей"""
     try:
+        # Сначала пробуем получить из API
         raffles = await api_client.get_active_raffles()
         
-        if not raffles:
-            await message.answer("😔 Сейчас нет активных розыгрышей. Следите за обновлениями!")
-            return
-        
-        # Показываем первый активный розыгрыш
-        raffle = raffles[0]
-        
-        # Форматируем дату окончания
-        end_date = datetime.fromisoformat(raffle['end_date'].replace('Z', '+00:00'))
-        end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
-        
-        # Создаем кнопку для участия с Web App
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text="🎯 Участвовать", 
-                web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle['id']}")
-            )]
-        ])
-        
-        # Форматируем призы
-        prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle.get('prizes', {}).items()])
-        
-        caption = (
-            f"🎉 **{raffle['title']}**\n\n"
-            f"{raffle['description']}\n\n"
-            f"🏆 **Призы:**\n{prizes_text}\n\n"
-            f"⏰ Завершится: {end_date_str}\n"
-            f"👥 Участников: {raffle.get('participants_count', 0)}"
-        )
-        
-        if raffle.get('photo_url'):
-            await message.answer_photo(
-                photo=raffle['photo_url'],
-                caption=caption,
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-        else:
-            await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
+        if raffles:
+            raffle = raffles[0]  # Показываем первый активный
             
+            # Создаем кнопку для участия с Web App
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🎯 Участвовать", 
+                    web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle['id']}")
+                )]
+            ])
+            
+            # Форматируем призы
+            prizes_text = ""
+            if isinstance(raffle.get('prizes'), dict):
+                prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle['prizes'].items()])
+            
+            # Форматируем дату
+            end_date = datetime.fromisoformat(raffle['end_date'].replace('Z', '+00:00'))
+            end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
+            
+            caption = (
+                f"🎉 **{raffle['title']}**\n\n"
+                f"{raffle['description']}\n\n"
+                f"🏆 **Призы:**\n{prizes_text}\n\n"
+                f"⏰ Завершится: {end_date_str}\n"
+                f"👥 Участников: {raffle.get('participants_count', 0)}"
+            )
+            
+            if raffle.get('photo_url'):
+                await message.answer_photo(
+                    photo=raffle['photo_url'],
+                    caption=caption,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            else:
+                await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            # Если API недоступен, пробуем локальный кеш
+            raffle = db.get_active_raffle()
+            if raffle:
+                # Создаем кнопку для участия
+                api_id = raffle.get('api_id', raffle['id'])
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="🎯 Участвовать", 
+                        web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{api_id}")
+                    )]
+                ])
+                
+                # Форматируем призы
+                prizes = raffle.get('prizes', {})
+                if isinstance(prizes, str):
+                    try:
+                        prizes = json.loads(prizes)
+                    except:
+                        prizes = {}
+                
+                prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in prizes.items()])
+                
+                # Форматируем дату
+                end_date = datetime.fromisoformat(raffle['end_date'])
+                end_date_str = end_date.strftime("%d.%m.%Y в %H:%M")
+                
+                caption = (
+                    f"🎉 **{raffle['title']}**\n\n"
+                    f"{raffle['description']}\n\n"
+                    f"🏆 **Призы:**\n{prizes_text}\n\n"
+                    f"⏰ Завершится: {end_date_str}"
+                )
+                
+                if raffle.get('photo_file_id'):
+                    await message.answer_photo(
+                        photo=raffle['photo_file_id'],
+                        caption=caption,
+                        reply_markup=keyboard,
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
+            else:
+                await message.answer("😔 Сейчас нет активных розыгрышей. Следите за обновлениями!")
+                
     except Exception as e:
         logger.error(f"Error showing active raffles: {e}")
-        await message.answer("Произошла ошибка при загрузке розыгрышей. Попробуйте позже.")
+        await message.answer("😔 Сейчас нет активных розыгрышей. Следите за обновлениями!")
 
 @dp.message(F.text == "📜 История розыгрышей")
 async def show_history(message: types.Message):
@@ -350,14 +442,13 @@ async def show_history(message: types.Message):
             
             # Показываем победителей
             if raffle.get('winners'):
-                for winner in raffle['winners'][:3]:  # Показываем первых 3
+                for winner in raffle['winners'][:3]:
                     history_text += f"🏆 {winner['position']} место: @{winner['user']['username'] or winner['user']['first_name']}\n"
                 if len(raffle['winners']) > 3:
                     history_text += f"... и еще {len(raffle['winners']) - 3} победителей\n"
             
             history_text += "─" * 30 + "\n\n"
         
-        # Telegram имеет лимит в 4096 символов
         if len(history_text) > 4000:
             history_text = history_text[:4000] + "\n\n... (показаны последние розыгрыши)"
         
@@ -365,7 +456,7 @@ async def show_history(message: types.Message):
         
     except Exception as e:
         logger.error(f"Error showing history: {e}")
-        await message.answer("Произошла ошибка при загрузке истории. Попробуйте позже.")
+        await message.answer("📜 История розыгрышей временно недоступна")
 
 @dp.message(F.text == "ℹ️ Информация")
 async def show_info(message: types.Message):
@@ -416,11 +507,10 @@ async def process_description(message: types.Message, state: FSMContext):
 async def process_photo(message: types.Message, state: FSMContext):
     """Обработка фото розыгрыша"""
     if message.photo:
-        # Загружаем фото на сервер
-        photo_url = await upload_photo_to_api(message.photo[-1].file_id)
-        await state.update_data(photo_url=photo_url)
+        photo_file_id = message.photo[-1].file_id
+        await state.update_data(photo_file_id=photo_file_id, photo_url=photo_file_id)
     elif message.text and message.text.lower() == 'пропустить':
-        await state.update_data(photo_url='')
+        await state.update_data(photo_file_id=None, photo_url='')
     else:
         await message.answer("Пожалуйста, отправьте фото или напишите 'пропустить'")
         return
@@ -442,9 +532,7 @@ async def process_channels(message: types.Message, state: FSMContext):
         await state.update_data(channels=channels)
     
     await state.set_state(RaffleStates.waiting_prizes)
-    await message.answer(
-        "Шаг 5/6: Введите количество призовых мест:"
-    )
+    await message.answer("Шаг 5/6: Введите количество призовых мест:")
 
 @dp.message(RaffleStates.waiting_prizes)
 async def process_prizes_count(message: types.Message, state: FSMContext):
@@ -506,7 +594,20 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
         loading_msg = await message.answer("⏳ Создаю розыгрыш...")
         
         try:
+            # Пробуем создать через API
             raffle = await api_client.create_raffle(data)
+            
+            # Сохраняем в локальный кеш
+            db.create_raffle_cache(
+                api_id=raffle['id'],
+                title=data['title'],
+                description=data['description'],
+                photo_file_id=data.get('photo_file_id'),
+                photo_url=data.get('photo_url', ''),
+                channels=data.get('channels', ''),
+                prizes=data['prizes'],
+                end_date=end_date
+            )
             
             await loading_msg.delete()
             await state.clear()
@@ -527,6 +628,7 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
             
         except Exception as e:
             await loading_msg.delete()
+            logger.error(f"Error creating raffle: {e}")
             await message.answer(
                 f"❌ Ошибка при создании розыгрыша: {str(e)}\n\n"
                 "Попробуйте еще раз или обратитесь к разработчику.",
@@ -567,10 +669,10 @@ async def send_raffle_notification(raffle_id: int, raffle_data: dict):
     success_count = 0
     for user_id in users:
         try:
-            if raffle_data.get('photo_url'):
+            if raffle_data.get('photo_file_id'):
                 await bot.send_photo(
                     chat_id=user_id,
-                    photo=raffle_data['photo_url'],
+                    photo=raffle_data['photo_file_id'],
                     caption=caption,
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -597,6 +699,50 @@ async def send_raffle_notification(raffle_id: int, raffle_data: dict):
             )
         except:
             pass
+
+async def notify_raffle_live(raffle_id: int):
+    """Уведомление о начале live розыгрыша"""
+    # Получаем данные о розыгрыше
+    raffle = db.get_active_raffle()
+    if not raffle:
+        return
+    
+    # Получаем всех заинтересованных пользователей
+    notif_users = db.get_users_with_notifications()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🎰 Смотреть розыгрыш",
+            web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle_id}/live")
+        )]
+    ])
+    
+    text = (
+        f"🎰 **Розыгрыш начался!**\n\n"
+        f"**{raffle['title']}**\n\n"
+        f"Нажмите кнопку ниже, чтобы посмотреть live-розыгрыш!"
+    )
+    
+    for user_id in notif_users:
+        try:
+            if raffle.get('photo_file_id'):
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=raffle['photo_file_id'],
+                    caption=text,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
 
 async def main():
     """Основная функция запуска бота"""
