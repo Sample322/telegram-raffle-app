@@ -14,7 +14,6 @@ import time
 import hashlib
 import hmac
 import urllib.parse
-
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -67,78 +66,76 @@ class APIClient:
     def __init__(self, api_url: str):
         self.api_url = api_url
     
+        # ─────────────────────────────────────────────────────────
     async def create_raffle(self, raffle_data: dict) -> dict:
         """Создание розыгрыша через API"""
         async with aiohttp.ClientSession() as session:
             url = f"{self.api_url}/api/admin/raffles"
 
-            # Подготовка данных для API
+            # 1. Формируем тело запроса
             api_data = {
-                "title": raffle_data['title'],
-                "description": raffle_data['description'],
-                "photo_url": raffle_data.get('photo_url', ''),
-                "channels": raffle_data['channels'].split() if raffle_data.get('channels') else [],
-                "prizes": raffle_data.get('prizes', {}),
-                "end_date": raffle_data['end_date'].isoformat(),
-                "draw_delay_minutes": 5
+                "title": raffle_data["title"],
+                "description": raffle_data["description"],
+                "photo_url": raffle_data.get("photo_url", ""),
+                "channels": raffle_data["channels"].split() if raffle_data.get("channels") else [],
+                "prizes": raffle_data.get("prizes", {}),
+                "end_date": raffle_data["end_date"].isoformat(),
+                "draw_delay_minutes": 5,
             }
 
-            # ---------- создаём «initData» администратора ----------
-            import json  # json уже есть вверху файла, но внутри метода безопасно
+            # 2. Собираем корректный initData администратора
+            import json  # локальный импорт, чтобы не дублировать вверху
 
             auth_date = int(time.time())
             admin_data = {
-                "id": ADMIN_IDS[0],       # берём первого админа
+                "id": ADMIN_IDS[0],   # первый ID в вашем списке админов
                 "first_name": "Admin",
-                "username": "admin"
+                "username": "admin",
             }
 
-            # строка-подпись для проверки
+            # JSON БЕЗ пробелов и с отсортированными ключами! <-- это было причиной 401
+            user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
+
             data_check_arr = [
                 f"auth_date={auth_date}",
-                f"user={json.dumps(admin_data)}"
+                f"user={user_json}",
             ]
-            data_check_string = '\n'.join(sorted(data_check_arr))
+            data_check_string = "\n".join(sorted(data_check_arr))
 
-            # вычисляем hash так же, как Telegram Web App
-            secret_key = hmac.new(
-                b"WebAppData",
-                BOT_TOKEN.encode(),
-                hashlib.sha256
-            ).digest()
+            # Telegram-алгоритм подписи
+            secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+            hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-            hash_value = hmac.new(
-                secret_key,
-                data_check_string.encode(),
-                hashlib.sha256
-            ).hexdigest()
-
-            init_data_params = {
-                "user": json.dumps(admin_data),
-                "auth_date": str(auth_date),
-                "hash": hash_value
-            }
-            init_data = urllib.parse.urlencode(init_data_params)
-            # ------------------------------------------------------
+            # Итоговая строка, которую бекенд ждёт в Authorization
+            init_data = urllib.parse.urlencode(
+                {
+                    "user": user_json,
+                    "auth_date": str(auth_date),
+                    "hash": hash_value,
+                }
+            )
 
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {init_data}"
+                "Authorization": f"Bearer {init_data}",
             }
 
+            # 3. Отправляем запрос
             try:
-                logger.info(f"Sending request to {url}")
-                async with session.post(url, json=api_data, headers=headers, ssl=False) as response:
-                    response_text = await response.text()
-                    logger.info(f"Response status: {response.status}, text: {response_text}")
+                logger.info("POST %s", url)
+                async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
+                    text = await resp.text()
+                    logger.info("API answered %s: %s", resp.status, text)
 
-                    if response.status in (200, 201):
-                        return await response.json()
-                    raise Exception(f"API error {response.status}: {response_text}")
+                    if resp.status in (200, 201):
+                        return await resp.json()
+                    raise Exception(f"API error {resp.status}: {text}")
 
             except aiohttp.ClientError as e:
-                logger.error(f"Network error: {e}")
+                logger.error("Network error: %s", e)
                 raise Exception(f"Ошибка сети: {e}")
+    # ─────────────────────────────────────────────────────────
+
 
     
     async def get_active_raffles(self) -> List[dict]:
