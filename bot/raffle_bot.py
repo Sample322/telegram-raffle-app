@@ -10,6 +10,10 @@ import json
 import os
 from dotenv import load_dotenv
 import aiohttp
+import time
+import hashlib
+import hmac
+import urllib.parse
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, StateFilter
@@ -66,8 +70,8 @@ class APIClient:
     async def create_raffle(self, raffle_data: dict) -> dict:
         """Создание розыгрыша через API"""
         async with aiohttp.ClientSession() as session:
-            url = f"{self.api_url}/api/admin/raffles"  # Правильный endpoint для создания
-            
+            url = f"{self.api_url}/api/admin/raffles"
+
             # Подготовка данных для API
             api_data = {
                 "title": raffle_data['title'],
@@ -78,25 +82,64 @@ class APIClient:
                 "end_date": raffle_data['end_date'].isoformat(),
                 "draw_delay_minutes": 5
             }
-            
+
+            # ---------- создаём «initData» администратора ----------
+            import json  # json уже есть вверху файла, но внутри метода безопасно
+
+            auth_date = int(time.time())
+            admin_data = {
+                "id": ADMIN_IDS[0],       # берём первого админа
+                "first_name": "Admin",
+                "username": "admin"
+            }
+
+            # строка-подпись для проверки
+            data_check_arr = [
+                f"auth_date={auth_date}",
+                f"user={json.dumps(admin_data)}"
+            ]
+            data_check_string = '\n'.join(sorted(data_check_arr))
+
+            # вычисляем hash так же, как Telegram Web App
+            secret_key = hmac.new(
+                b"WebAppData",
+                BOT_TOKEN.encode(),
+                hashlib.sha256
+            ).digest()
+
+            hash_value = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            init_data_params = {
+                "user": json.dumps(admin_data),
+                "auth_date": str(auth_date),
+                "hash": hash_value
+            }
+            init_data = urllib.parse.urlencode(init_data_params)
+            # ------------------------------------------------------
+
             headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bot your-bot-secret-key"
-}
-            
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {init_data}"
+            }
+
             try:
-                logger.info(f"Sending request to {url} with data: {api_data}")
+                logger.info(f"Sending request to {url}")
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as response:
                     response_text = await response.text()
                     logger.info(f"Response status: {response.status}, text: {response_text}")
-                    
-                    if response.status == 200 or response.status == 201:
+
+                    if response.status in (200, 201):
                         return await response.json()
-                    else:
-                        raise Exception(f"API error {response.status}: {response_text}")
+                    raise Exception(f"API error {response.status}: {response_text}")
+
             except aiohttp.ClientError as e:
                 logger.error(f"Network error: {e}")
                 raise Exception(f"Ошибка сети: {e}")
+
     
     async def get_active_raffles(self) -> List[dict]:
         """Получение активных розыгрышей из API"""
