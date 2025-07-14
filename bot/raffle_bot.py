@@ -23,6 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 # Загружаем переменные окружения
 load_dotenv()
 
+
 # Для работы с Excel
 try:
     import openpyxl
@@ -79,8 +80,9 @@ class APIClient:
             }
             
             headers = {
-                "Content-Type": "application/json"
-            }
+    "Content-Type": "application/json",
+    "Authorization": "Bot your-bot-secret-key"
+}
             
             try:
                 logger.info(f"Sending request to {url} with data: {api_data}")
