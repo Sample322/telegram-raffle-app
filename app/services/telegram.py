@@ -4,6 +4,8 @@ import hmac
 from typing import Optional, List
 import os
 from datetime import datetime
+import urllib.parse
+import json
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-app.onrender.com")
@@ -13,37 +15,52 @@ class TelegramService:
     def validate_init_data(init_data: str) -> dict:
         """Validate Telegram WebApp init data"""
         try:
-            data_check_string = init_data
+            # Создаем секретный ключ
             secret_key = hmac.new(
-                "WebAppData".encode(), 
+                b"WebAppData", 
                 BOT_TOKEN.encode(), 
                 hashlib.sha256
             ).digest()
             
-            # Parse init data
+            # Парсим параметры
             params = {}
             for param in init_data.split('&'):
-                key, value = param.split('=')
-                params[key] = value
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    # URL-декодируем значения
+                    params[key] = urllib.parse.unquote(value)
             
-            # Verify hash
+            # Извлекаем и удаляем hash
             received_hash = params.pop('hash', '')
+            
+            # Формируем строку для проверки подписи
             data_check_arr = []
             for key in sorted(params.keys()):
                 data_check_arr.append(f"{key}={params[key]}")
             
             data_check_string = '\n'.join(data_check_arr)
             
+            # Вычисляем hash
             calculated_hash = hmac.new(
                 secret_key,
                 data_check_string.encode(),
                 hashlib.sha256
             ).hexdigest()
             
+            # Проверяем подпись
             if calculated_hash == received_hash:
+                # Парсим user JSON, если есть
+                if 'user' in params:
+                    try:
+                        params['user'] = json.loads(params['user'])
+                    except:
+                        pass
                 return params
+            
             return None
-        except:
+            
+        except Exception as e:
+            print(f"Error validating init data: {e}")
             return None
     
     @staticmethod
