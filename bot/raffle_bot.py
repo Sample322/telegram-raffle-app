@@ -89,16 +89,19 @@ class APIClient:
                 "username": "admin",
             }
 
-            # 2‑a JSON без пробелов (некодированный) — нужен для hash
+            # 2‑a JSON без пробелов (сырой)
             user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
 
-            # 2‑b строка, по которой считается hash
+            # 2‑b URL‑кодируем JSON — понадобится и для hash, и для передачи
+            encoded_user = urllib.parse.quote(user_json, safe="")
+
+            # 2‑c строка, по которой считается hash  (используем encoded_user)
             data_check_string = "\n".join(sorted([
                 f"auth_date={auth_date}",
-                f"user={user_json}",
+                f"user={encoded_user}",
             ]))
 
-            # 2‑c вычисление hash (как у Telegram Web‑App)
+            # 2‑d вычисляем hash
             secret_key = hmac.new(
                 b"WebAppData",
                 BOT_TOKEN.encode(),
@@ -109,9 +112,6 @@ class APIClient:
                 data_check_string.encode(),
                 hashlib.sha256,
             ).hexdigest()
-
-            # 2‑d кодируем JSON только для передачи
-            encoded_user = urllib.parse.quote(user_json, safe="")
 
             # 2‑e итоговый initData
             init_data = (
@@ -127,7 +127,7 @@ class APIClient:
 
             # 3. сам POST
             try:
-                logger.debug("BOT_TOKEN first 20 chars: %s", BOT_TOKEN[:20])
+                logger.debug("BOT_TOKEN first 20 chars: %s", BOT_TOKEN[:20])
                 logger.debug("Authorization header: %s...", init_data[:120])
 
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
@@ -139,16 +139,6 @@ class APIClient:
                 raise Exception(f"Ошибка сети: {exc}") from exc
     # ──────────────────────────────────────────────────────────
 
-    async def get_active_raffles(self) -> List[Dict[str, Any]]:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.api_url}/api/raffles/active", ssl=False) as r:
-                return await r.json() if r.status == 200 else []
-
-    async def get_completed_raffles(self, limit: int = 10) -> List[Dict[str, Any]]:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.api_url}/api/raffles/completed?limit={limit}", ssl=False) as r:
-                return await r.json() if r.status == 200 else []
-# ── конец класса APIClient ─────────────────────────────────────────
 
 
 
