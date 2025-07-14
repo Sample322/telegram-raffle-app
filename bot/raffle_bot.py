@@ -65,7 +65,7 @@ class APIClient:
     async def create_raffle(self, raffle_data: dict) -> dict:
         """Создание розыгрыша через API"""
         async with aiohttp.ClientSession() as session:
-            url = f"{self.api_url}/api/raffles"  # Изменен endpoint
+            url = f"{self.api_url}/api/admin/raffles"  # Правильный endpoint для создания
             
             # Подготовка данных для API
             api_data = {
