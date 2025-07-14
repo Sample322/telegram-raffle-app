@@ -72,7 +72,7 @@ class APIClient:
         async with aiohttp.ClientSession() as session:
             url = f"{self.api_url}/api/admin/raffles"
 
-            # 1. Формируем тело запроса
+            # 1. Подготовка тела запроса
             api_data = {
                 "title": raffle_data["title"],
                 "description": raffle_data["description"],
@@ -83,36 +83,39 @@ class APIClient:
                 "draw_delay_minutes": 5,
             }
 
-            # 2. Собираем корректный initData администратора
-            import json  # локальный импорт, чтобы не дублировать вверху
+            # 2. Формируем корректное initData администратора
+            import json, urllib.parse, time, hashlib, hmac  # локальные импорты
 
             auth_date = int(time.time())
             admin_data = {
-                "id": ADMIN_IDS[0],   # первый ID в вашем списке админов
+                "id": ADMIN_IDS[0],    # первый ID из списка админов
                 "first_name": "Admin",
                 "username": "admin",
             }
 
-            # JSON БЕЗ пробелов и с отсортированными ключами! <-- это было причиной 401
+            # JSON без пробелов и с отсортированными ключами
             user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
 
-            data_check_arr = [
-                f"auth_date={auth_date}",
-                f"user={user_json}",
-            ]
-            data_check_string = "\n".join(sorted(data_check_arr))
+            # Процент-кодируем JSON так же, как делает Telegram Web App
+            encoded_user = urllib.parse.quote(user_json, safe="")
 
-            # Telegram-алгоритм подписи
+            # Строка для подписи (hash считается от кодированного user)
+            data_check_string = "\n".join(
+                sorted([
+                    f"auth_date={auth_date}",
+                    f"user={encoded_user}",
+                ])
+            )
+
+            # Вычисляем hash по алгоритму Telegram
             secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
             hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-            # Итоговая строка, которую бекенд ждёт в Authorization
-            init_data = urllib.parse.urlencode(
-                {
-                    "user": user_json,
-                    "auth_date": str(auth_date),
-                    "hash": hash_value,
-                }
+            # Итоговая строка initData
+            init_data = (
+                f"user={encoded_user}"
+                f"&auth_date={auth_date}"
+                f"&hash={hash_value}"
             )
 
             headers = {
@@ -134,7 +137,6 @@ class APIClient:
             except aiohttp.ClientError as e:
                 logger.error("Network error: %s", e)
                 raise Exception(f"Ошибка сети: {e}")
-    # ─────────────────────────────────────────────────────────
 
 
     
