@@ -122,6 +122,8 @@ class APIClient:
 
             # 3. сам POST
             try:
+                logger.debug("BOT_TOKEN in bot: %s", BOT_TOKEN[:20])
+                logger.debug("Authorization header: %s...", init_data[:120])
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
                     text = await resp.text()
                     if resp.status in (200, 201):
