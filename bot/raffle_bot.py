@@ -56,10 +56,10 @@ class RaffleStates(StatesGroup):
     waiting_end_datetime  = State()
 
 # ────────────────────────────────
-# ЕДИНСТВЕННЫЙ класс APIClient
+# ИСПРАВЛЕННЫЙ класс APIClient
 # ────────────────────────────────
 class APIClient:
-    """Клиент, подписывающий запросы как Telegram Web‑App"""
+    """Клиент, подписывающий запросы как Telegram Web‑App"""
 
     def __init__(self, api_url: str):
         self.api_url = api_url.rstrip("/")
@@ -83,43 +83,48 @@ class APIClient:
 
             # 2. формируем initData администратора
             auth_date = int(time.time())
+            
+            # ВАЖНО: id должен быть строкой в JSON
             admin_data = {
-                "id": ADMIN_IDS[0],          # ваш Telegram‑ID из ADMIN_IDS
+                "id": str(ADMIN_IDS[0]),     # Преобразуем в строку!
                 "first_name": "Admin",
                 "username": "admin",
             }
 
-            # 2‑a JSON без пробелов (сырой)
-            user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
-
-            # 2‑b URL‑кодируем JSON — понадобится и для hash, и для передачи
-            encoded_user = urllib.parse.quote(user_json, safe="")
-
-            # 2‑c строка, по которой считается hash  (используем encoded_user)
-            data_check_string = "\n".join(sorted([
-                f"auth_date={auth_date}",
-                f"user={encoded_user}",
-            ]))
-
-            # 2‑d вычисляем hash
+            # 2‑a JSON без пробелов
+            user_json = json.dumps(admin_data, separators=(",", ":"), ensure_ascii=False)
+            
+            # 2‑b URL‑кодируем JSON
+            encoded_user = urllib.parse.quote(user_json)
+            
+            # 2‑c формируем параметры для подписи
+            params = {
+                "auth_date": str(auth_date),
+                "user": user_json  # Используем НЕ закодированный JSON для подписи
+            }
+            
+            # 2‑d создаем строку для подписи
+            data_check_arr = []
+            for key in sorted(params.keys()):
+                data_check_arr.append(f"{key}={params[key]}")
+            data_check_string = "\n".join(data_check_arr)
+            
+            # 2‑e вычисляем hash
             secret_key = hmac.new(
                 b"WebAppData",
                 BOT_TOKEN.encode(),
-                hashlib.sha256,
+                hashlib.sha256
             ).digest()
+            
             hash_value = hmac.new(
                 secret_key,
                 data_check_string.encode(),
-                hashlib.sha256,
+                hashlib.sha256
             ).hexdigest()
-
-            # 2‑e итоговый initData
-            init_data = (
-                f"user={encoded_user}"
-                f"&auth_date={auth_date}"
-                f"&hash={hash_value}"
-            )
-
+            
+            # 2‑f итоговый initData (с URL-кодированным user)
+            init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+            
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {init_data}",
@@ -127,21 +132,21 @@ class APIClient:
 
             # 3. сам POST
             try:
-                logger.debug("BOT_TOKEN first 20 chars: %s", BOT_TOKEN[:20])
-                logger.debug("Authorization header: %s...", init_data[:120])
-
+                logger.info(f"Creating raffle with admin_id: {ADMIN_IDS[0]}")
+                logger.debug(f"Init data: {init_data[:50]}...")
+                
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
                     resp_text = await resp.text()
+                    logger.debug(f"Response status: {resp.status}")
+                    logger.debug(f"Response text: {resp_text}")
+                    
                     if resp.status in (200, 201):
                         return await resp.json()
                     raise Exception(f"API error {resp.status}: {resp_text}")
             except aiohttp.ClientError as exc:
+                logger.error(f"Network error: {exc}")
                 raise Exception(f"Ошибка сети: {exc}") from exc
     # ──────────────────────────────────────────────────────────
-
-
-
-
     
     async def get_active_raffles(self) -> List[dict]:
         """Получение активных розыгрышей из API"""
@@ -168,7 +173,6 @@ class APIClient:
             except Exception as e:
                 logger.error(f"Error getting completed raffles: {e}")
                 return []
-
 class DatabaseManager:
     """Класс для работы с локальной базой данных"""
     
