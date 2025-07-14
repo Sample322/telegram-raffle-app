@@ -14,104 +14,101 @@ import time
 import hashlib
 import hmac
 import urllib.parse
+
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, \
+                         ReplyKeyboardMarkup, KeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 
-# Загружаем переменные окружения
+# ────────────────────────────────
+# переменные окружения
+# ────────────────────────────────
 load_dotenv()
 
-
-# Для работы с Excel
-try:
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment
-    EXCEL_AVAILABLE = True
-except ImportError:
-    EXCEL_AVAILABLE = False
-    logging.warning("openpyxl не установлен. Экспорт будет в CSV формате.")
-
-# Настройки бота
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8056583131:AAH9qRCnWHcFKBkpmjTRk_zVGlHjCOx58Fs")
+BOT_TOKEN  = os.getenv("BOT_TOKEN", "")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://raffle-app-qtma.onrender.com")
-API_URL = os.getenv("API_URL", "https://raffle-api.onrender.com")
-ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "888007035").split(",")]
+API_URL    = os.getenv("API_URL",   "https://raffle-api.onrender.com")
+ADMIN_IDS  = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
 
-# Инициализация логирования
+# ────────────────────────────────
+# aiogram setup
+# ────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+dp  = Dispatcher(storage=MemoryStorage())
 
-# Состояния для FSM
+# ────────────────────────────────
+# FSM‑состояния (без изменений)
+# ────────────────────────────────
 class RaffleStates(StatesGroup):
-    waiting_title = State()
-    waiting_description = State()
-    waiting_photo = State()
-    waiting_channels = State()
-    waiting_prizes = State()
+    waiting_title         = State()
+    waiting_description   = State()
+    waiting_photo         = State()
+    waiting_channels      = State()
+    waiting_prizes        = State()
     waiting_prize_details = State()
-    waiting_end_datetime = State()
+    waiting_end_datetime  = State()
 
+# ────────────────────────────────
+# ЕДИНСТВЕННЫЙ класс APIClient
+# ────────────────────────────────
 class APIClient:
-    """Клиент для работы с API"""
-    
+    """Клиент, подписывающий запросы как Telegram Web App"""
+
     def __init__(self, api_url: str):
-        self.api_url = api_url
-    
-        # ─────────────────────────────────────────────────────────
-    async def create_raffle(self, raffle_data: dict) -> dict:
-        """Создание розыгрыша через API"""
+        self.api_url = api_url.rstrip("/")
+
+    async def create_raffle(self, raffle_data: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/admin/raffles"""
         async with aiohttp.ClientSession() as session:
             url = f"{self.api_url}/api/admin/raffles"
 
-            # 1. Подготовка тела запроса
+            # 1. тело запроса
             api_data = {
-                "title": raffle_data["title"],
+                "title":       raffle_data["title"],
                 "description": raffle_data["description"],
-                "photo_url": raffle_data.get("photo_url", ""),
-                "channels": raffle_data["channels"].split() if raffle_data.get("channels") else [],
-                "prizes": raffle_data.get("prizes", {}),
-                "end_date": raffle_data["end_date"].isoformat(),
+                "photo_url":   raffle_data.get("photo_url", ""),
+                "channels":    raffle_data["channels"].split()
+                               if raffle_data.get("channels") else [],
+                "prizes":      raffle_data.get("prizes", {}),
+                "end_date":    raffle_data["end_date"].isoformat(),
                 "draw_delay_minutes": 5,
             }
 
-            # 2. Формируем корректное initData администратора
-            import json, urllib.parse, time, hashlib, hmac  # локальные импорты
-
-            auth_date = int(time.time())
+            # 2. initData администратора
+            auth_date  = int(time.time())
             admin_data = {
-                "id": ADMIN_IDS[0],    # первый ID из списка админов
+                "id":         ADMIN_IDS[0],
                 "first_name": "Admin",
-                "username": "admin",
+                "username":   "admin"
             }
 
-            # JSON без пробелов и с отсортированными ключами
-            user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
-
-            # Процент-кодируем JSON так же, как делает Telegram Web App
+            user_json    = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
             encoded_user = urllib.parse.quote(user_json, safe="")
 
-            # Строка для подписи (hash считается от кодированного user)
-            data_check_string = "\n".join(
-                sorted([
-                    f"auth_date={auth_date}",
-                    f"user={encoded_user}",
-                ])
-            )
+            data_check_string = "\n".join(sorted([
+                f"auth_date={auth_date}",
+                f"user={encoded_user}"
+            ]))
 
-            # Вычисляем hash по алгоритму Telegram
-            secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-            hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+            secret_key = hmac.new(
+                b"WebAppData",
+                BOT_TOKEN.encode(),
+                hashlib.sha256
+            ).digest()
 
-            # Итоговая строка initData
+            hash_value = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
             init_data = (
                 f"user={encoded_user}"
                 f"&auth_date={auth_date}"
@@ -120,23 +117,29 @@ class APIClient:
 
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {init_data}",
+                "Authorization": f"Bearer {init_data}"
             }
 
-            # 3. Отправляем запрос
+            # 3. сам POST
             try:
-                logger.info("POST %s", url)
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
                     text = await resp.text()
-                    logger.info("API answered %s: %s", resp.status, text)
-
                     if resp.status in (200, 201):
                         return await resp.json()
                     raise Exception(f"API error {resp.status}: {text}")
+            except aiohttp.ClientError as exc:
+                raise Exception(f"Ошибка сети: {exc}") from exc
 
-            except aiohttp.ClientError as e:
-                logger.error("Network error: %s", e)
-                raise Exception(f"Ошибка сети: {e}")
+    async def get_active_raffles(self) -> List[Dict[str, Any]]:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.api_url}/api/raffles/active", ssl=False) as r:
+                return await r.json() if r.status == 200 else []
+
+    async def get_completed_raffles(self, limit: int = 10) -> List[Dict[str, Any]]:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.api_url}/api/raffles/completed?limit={limit}", ssl=False) as r:
+                return await r.json() if r.status == 200 else []
+# ── конец класса APIClient ─────────────────────────────────────────
 
 
     
