@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("/active", response_model=List[RaffleSchema])
 async def get_active_raffles(db: AsyncSession = Depends(get_db)):
-    """Get all active raffles"""
+    """Get all active raffles - PUBLIC ENDPOINT"""
     result = await db.execute(
         select(Raffle).where(
             Raffle.is_active == True,
@@ -73,7 +73,7 @@ async def get_completed_raffles(
 
 @router.get("/{raffle_id}", response_model=RaffleSchema)
 async def get_raffle(raffle_id: int, db: AsyncSession = Depends(get_db)):
-    """Get raffle details"""
+    """Get raffle details - PUBLIC ENDPOINT"""
     result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
     raffle = result.scalar_one_or_none()
     
