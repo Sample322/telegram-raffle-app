@@ -59,11 +59,12 @@ class RaffleStates(StatesGroup):
 # ЕДИНСТВЕННЫЙ класс APIClient
 # ────────────────────────────────
 class APIClient:
-    """Клиент, подписывающий запросы как Telegram Web App"""
+    """Клиент, подписывающий запросы как Telegram Web‑App"""
 
     def __init__(self, api_url: str):
         self.api_url = api_url.rstrip("/")
 
+    # ──────────────────────────────────────────────────────────
     async def create_raffle(self, raffle_data: Dict[str, Any]) -> Dict[str, Any]:
         """POST /api/admin/raffles"""
         async with aiohttp.ClientSession() as session:
@@ -71,44 +72,48 @@ class APIClient:
 
             # 1. тело запроса
             api_data = {
-                "title":       raffle_data["title"],
+                "title":  raffle_data["title"],
                 "description": raffle_data["description"],
-                "photo_url":   raffle_data.get("photo_url", ""),
-                "channels":    raffle_data["channels"].split()
-                               if raffle_data.get("channels") else [],
-                "prizes":      raffle_data.get("prizes", {}),
-                "end_date":    raffle_data["end_date"].isoformat(),
+                "photo_url": raffle_data.get("photo_url", ""),
+                "channels": raffle_data["channels"].split() if raffle_data.get("channels") else [],
+                "prizes": raffle_data.get("prizes", {}),
+                "end_date": raffle_data["end_date"].isoformat(),
                 "draw_delay_minutes": 5,
             }
 
-            # 2. initData администратора
-            auth_date  = int(time.time())
+            # 2. формируем initData администратора
+            auth_date = int(time.time())
             admin_data = {
-                "id":         ADMIN_IDS[0],
+                "id": ADMIN_IDS[0],          # ваш Telegram‑ID из ADMIN_IDS
                 "first_name": "Admin",
-                "username":   "admin"
+                "username": "admin",
             }
 
-            user_json    = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
-            encoded_user = urllib.parse.quote(user_json, safe="")
+            # 2‑a JSON без пробелов (некодированный) — нужен для hash
+            user_json = json.dumps(admin_data, separators=(",", ":"), sort_keys=True)
 
+            # 2‑b строка, по которой считается hash
             data_check_string = "\n".join(sorted([
                 f"auth_date={auth_date}",
-                f"user={encoded_user}"
+                f"user={user_json}",
             ]))
 
+            # 2‑c вычисление hash (как у Telegram Web‑App)
             secret_key = hmac.new(
                 b"WebAppData",
                 BOT_TOKEN.encode(),
-                hashlib.sha256
+                hashlib.sha256,
             ).digest()
-
             hash_value = hmac.new(
                 secret_key,
                 data_check_string.encode(),
-                hashlib.sha256
+                hashlib.sha256,
             ).hexdigest()
 
+            # 2‑d кодируем JSON только для передачи
+            encoded_user = urllib.parse.quote(user_json, safe="")
+
+            # 2‑e итоговый initData
             init_data = (
                 f"user={encoded_user}"
                 f"&auth_date={auth_date}"
@@ -117,20 +122,22 @@ class APIClient:
 
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {init_data}"
+                "Authorization": f"Bearer {init_data}",
             }
 
-            # 3. сам POST
+            # 3. сам POST
             try:
-                logger.debug("BOT_TOKEN in bot: %s", BOT_TOKEN[:20])
+                logger.debug("BOT_TOKEN first 20 chars: %s", BOT_TOKEN[:20])
                 logger.debug("Authorization header: %s...", init_data[:120])
+
                 async with session.post(url, json=api_data, headers=headers, ssl=False) as resp:
-                    text = await resp.text()
+                    resp_text = await resp.text()
                     if resp.status in (200, 201):
                         return await resp.json()
-                    raise Exception(f"API error {resp.status}: {text}")
+                    raise Exception(f"API error {resp.status}: {resp_text}")
             except aiohttp.ClientError as exc:
                 raise Exception(f"Ошибка сети: {exc}") from exc
+    # ──────────────────────────────────────────────────────────
 
     async def get_active_raffles(self) -> List[Dict[str, Any]]:
         async with aiohttp.ClientSession() as session:
@@ -142,6 +149,7 @@ class APIClient:
             async with session.get(f"{self.api_url}/api/raffles/completed?limit={limit}", ssl=False) as r:
                 return await r.json() if r.status == 200 else []
 # ── конец класса APIClient ─────────────────────────────────────────
+
 
 
     
