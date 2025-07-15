@@ -174,6 +174,77 @@ class APIClient:
             except Exception as e:
                 logger.error(f"Error getting completed raffles: {e}")
                 return []
+# Добавьте эту функцию в bot/raffle_bot.py после создания api_client
+
+async def upload_photo_to_api(photo_file_id: str) -> str:
+    """Загрузка фото на сервер через API"""
+    try:
+        # Получаем файл от Telegram
+        file = await bot.get_file(photo_file_id)
+        file_path = file.file_path
+        
+        # Скачиваем файл
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+        
+        async with aiohttp.ClientSession() as session:
+            # Скачиваем изображение
+            async with session.get(file_url) as resp:
+                if resp.status == 200:
+                    image_data = await resp.read()
+                    
+                    # Загружаем на наш сервер
+                    api_key = os.getenv("ADMIN_API_KEY", "your-secret-admin-api-key-12345")
+                    upload_url = f"{API_URL}/api/admin/upload-image"
+                    
+                    # Создаем FormData
+                    data = aiohttp.FormData()
+                    data.add_field('file',
+                                 image_data,
+                                 filename='raffle_image.jpg',
+                                 content_type='image/jpeg')
+                    
+                    # Отправляем с простой авторизацией по API ключу
+                    headers = {
+                        'X-API-Key': api_key
+                    }
+                    
+                    async with session.post(upload_url, data=data, headers=headers) as upload_resp:
+                        if upload_resp.status == 200:
+                            result = await upload_resp.json()
+                            # Возвращаем полный URL
+                            return f"{API_URL.rstrip('/')}{result['url']}"
+                        else:
+                            logger.error(f"Upload failed: {upload_resp.status}")
+                            return photo_file_id
+                            
+    except Exception as e:
+        logger.error(f"Error uploading photo: {e}")
+        return photo_file_id
+
+# И обновите обработчик process_photo:
+@dp.message(RaffleStates.waiting_photo)
+async def process_photo(message: types.Message, state: FSMContext):
+    """Обработка фото розыгрыша"""
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id
+        # Загружаем фото на сервер
+        loading_msg = await message.answer("⏳ Загружаю изображение...")
+        photo_url = await upload_photo_to_api(photo_file_id)
+        await loading_msg.delete()
+        
+        await state.update_data(photo_file_id=photo_file_id, photo_url=photo_url)
+    elif message.text and message.text.lower() == 'пропустить':
+        await state.update_data(photo_file_id=None, photo_url='')
+    else:
+        await message.answer("Пожалуйста, отправьте фото или напишите 'пропустить'")
+        return
+    
+    await state.set_state(RaffleStates.waiting_channels)
+    await message.answer(
+        "Шаг 4/6: Введите каналы для обязательной подписки\n"
+        "Формат: @channel1 @channel2 @channel3\n"
+        "(или напишите 'пропустить' если подписка не требуется)"
+    )
 class DatabaseManager:
     """Класс для работы с локальной базой данных"""
     
@@ -626,21 +697,31 @@ async def process_prize_details(message: types.Message, state: FSMContext):
             "Например: 25.12.2024 18:00"
         )
 
+# В функции process_end_datetime добавьте конвертацию времени:
+
 @dp.message(RaffleStates.waiting_end_datetime)
 async def process_end_datetime(message: types.Message, state: FSMContext):
     """Обработка даты и времени завершения"""
     try:
-        # Парсим дату и время
+        # Парсим дату и время (предполагаем что пользователь вводит в своей таймзоне)
         end_date = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
         
+        # Добавляем таймзону Москвы (UTC+3)
+        from datetime import timezone, timedelta
+        moscow_tz = timezone(timedelta(hours=3))
+        end_date = end_date.replace(tzinfo=moscow_tz)
+        
+        # Конвертируем в UTC для сохранения
+        end_date_utc = end_date.astimezone(timezone.utc)
+        
         # Проверяем, что дата в будущем
-        if end_date <= datetime.now():
+        if end_date_utc <= datetime.now(timezone.utc):
             await message.answer("❌ Дата должна быть в будущем! Попробуйте еще раз:")
             return
         
         # Получаем все данные
         data = await state.get_data()
-        data['end_date'] = end_date
+        data['end_date'] = end_date_utc  # Сохраняем в UTC
         
         # Создаем розыгрыш через API
         loading_msg = await message.answer("⏳ Создаю розыгрыш...")
@@ -658,17 +739,19 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
                 photo_url=data.get('photo_url', ''),
                 channels=data.get('channels', ''),
                 prizes=data['prizes'],
-                end_date=end_date
+                end_date=end_date_utc
             )
             
             await loading_msg.delete()
             await state.clear()
             
             keyboard = create_admin_keyboard()
+            
+            # Показываем время в московской таймзоне
             await message.answer(
                 "✅ Розыгрыш успешно создан!\n\n"
                 f"📋 Название: {data['title']}\n"
-                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')}\n"
+                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')} МСК\n"
                 f"🏆 Призовых мест: {data['prizes_count']}\n\n"
                 "⏰ Результаты будут подведены автоматически!\n\n"
                 "Сейчас начнется рассылка уведомлений...",
@@ -692,7 +775,8 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
         await message.answer(
             "❌ Неверный формат даты!\n\n"
             "Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ\n"
-            "Например: 25.12.2024 18:00"
+            "Например: 25.12.2024 18:00\n\n"
+            "Время указывайте по Москве (МСК)"
         )
 
 async def send_raffle_notification(raffle_id: int, raffle_data: dict):
