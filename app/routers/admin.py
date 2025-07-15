@@ -45,24 +45,35 @@ async def create_raffle(
     
     return raffle
 
+# Добавьте этот обновленный эндпоинт в backend/app/routers/admin.py
+
 @router.post("/upload-image")
 async def upload_image(
     file: UploadFile = File(...),
-    current_admin: Admin = Depends(get_current_admin)
+    x_api_key: str = Header(None),
+    current_admin: Admin = Depends(get_current_admin) if not x_api_key else None
 ):
-    """Upload raffle image"""
+    """Upload raffle image with API key or admin auth"""
+    # Проверяем авторизацию через API ключ
+    if x_api_key:
+        expected_key = os.getenv("ADMIN_API_KEY", "your-secret-admin-api-key-12345")
+        if x_api_key != expected_key:
+            raise HTTPException(status_code=403, detail="Invalid API key")
+    elif not current_admin:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     # Validate file type
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
     # Generate unique filename
-    file_ext = file.filename.split(".")[-1]
+    file_ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
     file_name = f"{uuid.uuid4()}.{file_ext}"
     file_path = os.path.join(UPLOAD_DIR, file_name)
     
     # Save file
+    content = await file.read()
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
     
     # Return URL
