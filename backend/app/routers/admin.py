@@ -46,6 +46,7 @@ async def create_raffle(
     return raffle
 
 # Добавьте этот обновленный эндпоинт в backend/app/routers/admin.py
+# Добавьте этот обновленный эндпоинт в backend/app/routers/admin.py
 
 @router.post("/upload-image")
 async def upload_image(

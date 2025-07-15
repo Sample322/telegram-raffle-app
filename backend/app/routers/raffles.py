@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
-from typing import Optional
+
 from ..database import get_db
 from ..models import Raffle, Participant, User, Winner
 from ..schemas import Raffle as RaffleSchema, RaffleWithWinners
@@ -60,14 +60,42 @@ async def get_completed_raffles(
         for winner, user in winners_data:
             winners.append({
                 "position": winner.position,
-                "user": user,
+                "user": {
+                    "id": user.id,
+                    "telegram_id": user.telegram_id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "notifications_enabled": user.notifications_enabled,
+                    "created_at": user.created_at.isoformat() if user.created_at else None
+                },
                 "prize": winner.prize
             })
         
-        raffles_with_winners.append({
-            **raffle.__dict__,
+        raffle_dict = {
+            "id": raffle.id,
+            "title": raffle.title,
+            "description": raffle.description,
+            "photo_url": raffle.photo_url,
+            "channels": raffle.channels,
+            "prizes": raffle.prizes,
+            "start_date": raffle.start_date.isoformat() if raffle.start_date else None,
+            "end_date": raffle.end_date.isoformat() if raffle.end_date else None,
+            "draw_delay_minutes": raffle.draw_delay_minutes,
+            "is_active": raffle.is_active,
+            "is_completed": raffle.is_completed,
+            "draw_started": raffle.draw_started,
+            "participants_count": 0,
             "winners": winners
-        })
+        }
+        
+        # Get participants count
+        count_result = await db.execute(
+            select(func.count(Participant.id)).where(Participant.raffle_id == raffle.id)
+        )
+        raffle_dict["participants_count"] = count_result.scalar()
+        
+        raffles_with_winners.append(raffle_dict)
     
     return raffles_with_winners
 
@@ -172,15 +200,6 @@ async def check_participation(
     
     try:
         # Пробуем получить пользователя
-        from ..utils.auth import get_current_user
-        from fastapi import Request
-        
-        # Создаем фейковый request для передачи header
-        class FakeRequest:
-            def __init__(self, auth):
-                self.headers = {"authorization": auth}
-        
-        fake_request = FakeRequest(authorization)
         current_user = await get_current_user(authorization, db)
         
         result = await db.execute(
@@ -196,71 +215,3 @@ async def check_participation(
     except Exception as e:
         # Если ошибка авторизации, просто возвращаем false
         return {"is_participating": False}
-
-# Также исправим эндпоинт для истории с правильной обработкой времени
-@router.get("/completed", response_model=List[RaffleWithWinners])
-async def get_completed_raffles(
-    limit: int = Query(10, ge=1, le=50),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get completed raffles with winners"""
-    result = await db.execute(
-        select(Raffle).where(
-            Raffle.is_completed == True
-        ).order_by(Raffle.end_date.desc()).limit(limit).offset(offset)
-    )
-    raffles = result.scalars().all()
-    
-    raffles_with_winners = []
-    for raffle in raffles:
-        # Get winners
-        winners_result = await db.execute(
-            select(Winner, User).join(User).where(
-                Winner.raffle_id == raffle.id
-            ).order_by(Winner.position)
-        )
-        winners_data = winners_result.all()
-        
-        winners = []
-        for winner, user in winners_data:
-            winners.append({
-                "position": winner.position,
-                "user": {
-                    "id": user.id,
-                    "telegram_id": user.telegram_id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "notifications_enabled": user.notifications_enabled,
-                    "created_at": user.created_at.isoformat() if user.created_at else None
-                },
-                "prize": winner.prize
-            })
-        
-        raffle_dict = {
-            "id": raffle.id,
-            "title": raffle.title,
-            "description": raffle.description,
-            "photo_url": raffle.photo_url,
-            "channels": raffle.channels,
-            "prizes": raffle.prizes,
-            "start_date": raffle.start_date.isoformat() if raffle.start_date else None,
-            "end_date": raffle.end_date.isoformat() if raffle.end_date else None,
-            "draw_delay_minutes": raffle.draw_delay_minutes,
-            "is_active": raffle.is_active,
-            "is_completed": raffle.is_completed,
-            "draw_started": raffle.draw_started,
-            "participants_count": 0,
-            "winners": winners
-        }
-        
-        # Get participants count
-        count_result = await db.execute(
-            select(func.count(Participant.id)).where(Participant.raffle_id == raffle.id)
-        )
-        raffle_dict["participants_count"] = count_result.scalar()
-        
-        raffles_with_winners.append(raffle_dict)
-    
-    return raffles_with_winners
