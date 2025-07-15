@@ -1,578 +1,96 @@
-/* Reset и базовые стили */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Современная цветовая схема */
-:root {
-  /* Основные цвета */
-  --primary: #6366f1;      /* Индиго */
-  --primary-dark: #4f46e5;
-  --primary-light: #818cf8;
+/* Custom styles for Telegram Web App */
+@layer base {
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--tg-theme-bg-color, #ffffff);
+    color: var(--tg-theme-text-color, #000000);
+  }
   
-  /* Акцентные цвета */
-  --accent: #f59e0b;       /* Янтарный */
-  --accent-dark: #d97706;
-  --accent-light: #fbbf24;
-  
-  /* Нейтральные цвета */
-  --gray-50: #fafafa;
-  --gray-100: #f4f4f5;
-  --gray-200: #e4e4e7;
-  --gray-300: #d4d4d8;
-  --gray-400: #a1a1aa;
-  --gray-500: #71717a;
-  --gray-600: #52525b;
-  --gray-700: #3f3f46;
-  --gray-800: #27272a;
-  --gray-900: #18181b;
-  
-  /* Семантические цвета */
-  --success: #10b981;
-  --success-light: #34d399;
-  --success-dark: #059669;
-  
-  --danger: #ef4444;
-  --danger-light: #f87171;
-  --danger-dark: #dc2626;
-  
-  --warning: #f59e0b;
-  --warning-light: #fbbf24;
-  --warning-dark: #d97706;
-  
-  --info: #3b82f6;
-  --info-light: #60a5fa;
-  --info-dark: #2563eb;
-  
-  /* Фоны и текст */
-  --bg-primary: #ffffff;
-  --bg-secondary: #fafafa;
-  --bg-tertiary: #f4f4f5;
-  
-  --text-primary: #18181b;
-  --text-secondary: #52525b;
-  --text-tertiary: #71717a;
-  --text-inverse: #ffffff;
-  
-  /* Границы и тени */
-  --border-color: #e4e4e7;
-  --border-radius: 12px;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-}
-
-/* Темная тема */
-@media (prefers-color-scheme: dark) {
+  /* Telegram theme variables */
   :root {
-    --bg-primary: #18181b;
-    --bg-secondary: #27272a;
-    --bg-tertiary: #3f3f46;
-    
-    --text-primary: #fafafa;
-    --text-secondary: #d4d4d8;
-    --text-tertiary: #a1a1aa;
-    --text-inverse: #18181b;
-    
-    --border-color: #3f3f46;
+    --tg-theme-bg-color: #ffffff;
+    --tg-theme-text-color: #000000;
+    --tg-theme-hint-color: #999999;
+    --tg-theme-link-color: #0088cc;
+    --tg-theme-button-color: #0088cc;
+    --tg-theme-button-text-color: #ffffff;
+    --tg-theme-secondary-bg-color: #f0f0f0;
   }
 }
 
-/* Базовые стили */
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  line-height: 1.6;
-}
-
-/* Контейнеры */
-.container {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 20px;
-  min-height: 100vh;
-}
-
-/* Карточки */
-.card {
-  background: var(--bg-primary);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border-color);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
-}
-
-/* Заголовки */
-h1, h2, h3, h4, h5, h6 {
-  color: var(--text-primary);
-  margin-bottom: 0.5em;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-h1 { font-size: 2.5rem; }
-h2 { font-size: 2rem; }
-h3 { font-size: 1.5rem; }
-h4 { font-size: 1.25rem; }
-h5 { font-size: 1.125rem; }
-h6 { font-size: 1rem; }
-
-/* Текст */
-p {
-  color: var(--text-secondary);
-  margin-bottom: 1em;
-}
-
-.text-primary { color: var(--text-primary) !important; }
-.text-secondary { color: var(--text-secondary) !important; }
-.text-tertiary { color: var(--text-tertiary) !important; }
-
-/* Кнопки */
-.btn {
-  background: var(--primary);
-  color: var(--text-inverse);
-  border: none;
-  border-radius: 8px;
-  padding: 12px 24px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-  min-height: 44px;
-  position: relative;
-  overflow: hidden;
-}
-
-.btn:hover {
-  background: var(--primary-dark);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.btn:active {
-  transform: translateY(0);
-  box-shadow: var(--shadow-sm);
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none !important;
-}
-
-/* Варианты кнопок */
-.btn-secondary {
-  background: var(--gray-200);
-  color: var(--text-primary);
-}
-
-.btn-secondary:hover {
-  background: var(--gray-300);
-}
-
-.btn-success {
-  background: var(--success);
-}
-
-.btn-success:hover {
-  background: var(--success-dark);
-}
-
-.btn-danger {
-  background: var(--danger);
-}
-
-.btn-danger:hover {
-  background: var(--danger-dark);
-}
-
-.btn-accent {
-  background: var(--accent);
-}
-
-.btn-accent:hover {
-  background: var(--accent-dark);
-}
-
-.btn-block {
-  width: 100%;
-}
-
-/* Навигация */
-.nav-header {
-  position: sticky;
-  top: 0;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  z-index: 100;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.9);
-}
-
-@media (prefers-color-scheme: dark) {
-  .nav-header {
-    background: rgba(24, 24, 27, 0.9);
+@layer components {
+  /* Button styles */
+  .btn-primary {
+    @apply bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-800 py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors duration-200 font-medium;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow duration-300;
+  }
+  
+  /* Loading spinner */
+  .spinner {
+    @apply animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500;
   }
 }
 
-.nav-back {
-  background: var(--gray-100);
-  border: none;
-  padding: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: all 0.2s ease;
-  width: 40px;
-  height: 40px;
-}
-
-.nav-back:hover {
-  background: var(--gray-200);
-  transform: scale(1.05);
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-/* Изображения розыгрышей */
-.raffle-image {
-  width: 100%;
-  height: 200px;
-  object-fit: cover;
-  border-radius: var(--border-radius);
-  margin-bottom: 16px;
-  background: var(--gray-100);
-}
-
-/* Карточка розыгрыша */
-.raffle-card {
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-}
-
-.raffle-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-xl);
-  border-color: var(--primary-light);
-}
-
-.raffle-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.raffle-description {
-  margin-bottom: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  color: var(--text-secondary);
-}
-
-.raffle-info {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.raffle-info > div,
-.raffle-prizes {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text-tertiary);
-}
-
-.raffle-info svg,
-.raffle-prizes svg {
-  color: var(--primary);
-  width: 16px;
-  height: 16px;
-}
-
-/* Статусы */
-.status-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.status-active {
-  background: var(--success-light);
-  color: var(--success-dark);
-}
-
-.status-completed {
-  background: var(--gray-200);
-  color: var(--gray-600);
-}
-
-.status-pending {
-  background: var(--warning-light);
-  color: var(--warning-dark);
-}
-
-/* Участники */
-.participants-count {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-/* Таймер */
-.countdown {
-  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-  border-radius: var(--border-radius);
-  padding: 24px;
-  text-align: center;
-  margin: 20px 0;
-  color: var(--text-inverse);
-  box-shadow: var(--shadow-lg);
-}
-
-.countdown-label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  font-size: 16px;
-  opacity: 0.9;
-}
-
-.countdown-value {
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-
-/* Формы */
-input, textarea, select {
-  width: 100%;
-  padding: 12px 16px;
-  border: 2px solid var(--border-color);
-  border-radius: 8px;
-  font-size: 16px;
-  transition: all 0.2s ease;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-/* Ошибки */
-.error-message {
-  background: var(--danger-light);
-  color: var(--danger-dark);
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin: 16px 0;
-  border: 1px solid var(--danger);
-  font-weight: 500;
-}
-
-/* Успех */
-.success-message {
-  background: var(--success-light);
-  color: var(--success-dark);
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin: 16px 0;
-  border: 1px solid var(--success);
-  font-weight: 500;
-}
-
-/* Загрузка */
-.loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 40px;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--gray-200);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
+/* Wheel animation */
 @keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Модальные окна */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: var(--bg-primary);
-  border-radius: var(--border-radius);
-  padding: 32px;
-  max-width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: var(--shadow-xl);
-}
-
-/* Призы */
-.prize-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-  margin-bottom: 8px;
-  transition: all 0.2s ease;
-}
-
-.prize-item:hover {
-  background: var(--gray-200);
-  transform: translateX(4px);
-}
-
-.prize-position {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--primary);
-  min-width: 40px;
-  text-align: center;
-}
-
-.prize-details {
-  flex: 1;
-}
-
-.prize-name {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.prize-description {
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-/* Медали */
-.medal-gold { color: #fbbf24; }
-.medal-silver { color: #d4d4d8; }
-.medal-bronze { color: #d97706; }
-
-/* Адаптивность */
-@media (max-width: 480px) {
-  .container {
-    padding: 16px;
-  }
-  
-  h1 { font-size: 2rem; }
-  h2 { font-size: 1.5rem; }
-  h3 { font-size: 1.25rem; }
-  
-  .raffle-info {
-    gap: 12px;
-  }
-  
-  .countdown-value {
-    font-size: 24px;
-  }
-}
-
-/* Анимации */
-@keyframes fadeIn {
   from {
-    opacity: 0;
-    transform: translateY(10px);
+    transform: rotate(0deg);
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
+    transform: rotate(360deg);
   }
 }
 
-.fade-in {
-  animation: fadeIn 0.3s ease-out;
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
-/* Скроллбар */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.wheel-spinning {
+  animation: spin 0.5s linear infinite;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+.winner-bounce {
+  animation: bounce 0.5s ease-in-out;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--gray-400);
-  border-radius: 4px;
+/* Telegram Web App specific styles */
+.tg-viewport {
+  min-height: var(--tg-viewport-height, 100vh);
+  max-height: var(--tg-viewport-height, 100vh);
+  overflow-y: auto;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--gray-500);
+/* Disable text selection for better UX */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Safe area for iOS devices */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
 }
