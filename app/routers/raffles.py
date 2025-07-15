@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import Raffle, Participant, User, Winner
@@ -112,7 +112,7 @@ async def participate_in_raffle(
     if not raffle.is_active or raffle.is_completed:
         raise HTTPException(status_code=400, detail="Raffle is not active")
     
-    if datetime.utcnow() > raffle.end_date:
+    if datetime.now(timezone.utc) > raffle.end_date:
         raise HTTPException(status_code=400, detail="Raffle has ended")
     
     # Check channels subscription
