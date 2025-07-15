@@ -1,51 +1,44 @@
-# syntax=docker/dockerfile:1.6
-
-###############################################################################
-# ⛏  Build stage – compile the React application
-###############################################################################
-FROM node:18.20.2-alpine AS build    
+# Build stage
+FROM node:18-alpine as build
 
 WORKDIR /app
 
-# 1️⃣  Install dependencies (this layer is reused if package*.json unchanged)
+# Copy package files
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
-# 2️⃣  Copy application sources
+# Copy source code
 COPY . .
 
-# 3️⃣  Build with environment variables baked in
+# Build the app with environment variables
 ARG REACT_APP_API_URL
 ARG REACT_APP_WS_URL
-ENV REACT_APP_API_URL=$REACT_APP_API_URL \
-    REACT_APP_WS_URL=$REACT_APP_WS_URL
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 
 RUN npm run build
 
+# Production stage
+FROM nginx:alpine
 
-###############################################################################
-# 🚀  Runtime stage – serve the static files with NGINX
-###############################################################################
-FROM nginx:1.27-alpine            
-
-# 1️⃣  Copy the compiled artefacts
+# Copy built files
 COPY --from=build /app/build /usr/share/nginx/html
 
-# 2️⃣  Provide a minimal default config
-#     (If you want a custom nginx.conf, mount or COPY it at build time
-#      and overwrite /etc/nginx/conf.d/default.conf)
-RUN printf 'server {\n\
-    listen 80;\n\
-    server_name localhost;\n\
-    root /usr/share/nginx/html;\n\
-    index index.html;\n\
-    location / {\n\
-        try_files $uri $uri/ /index.html;\n\
-    }\n\
-}\n' > /etc/nginx/conf.d/default.conf
+# Copy nginx config if exists
+COPY nginx.conf /etc/nginx/conf.d/default.conf 2>/dev/null || true
 
-# 3️⃣  Drop privileges – run as the nginx user instead of root
-USER nginx
+# Add a default nginx config if none exists
+RUN if [ ! -f /etc/nginx/conf.d/default.conf ]; then \
+    echo 'server { \
+        listen 80; \
+        server_name localhost; \
+        root /usr/share/nginx/html; \
+        index index.html; \
+        location / { \
+            try_files $uri $uri/ /index.html; \
+        } \
+    }' > /etc/nginx/conf.d/default.conf; \
+    fi
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
