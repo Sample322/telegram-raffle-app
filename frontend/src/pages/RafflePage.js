@@ -12,7 +12,8 @@ const RafflePage = () => {
   const [raffle, setRaffle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [participating, setParticipating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [channelStatuses, setChannelStatuses] = useState({});
+  const [checkingChannels, setCheckingChannels] = useState(false);
 
   useEffect(() => {
     loadRaffle();
@@ -24,13 +25,8 @@ const RafflePage = () => {
       setRaffle(response.data);
       
       // Check participation status
-      try {
-        const participationRes = await api.get(`/raffles/${id}/check-participation`);
-        setParticipating(participationRes.data.is_participating);
-      } catch (error) {
-        // Если ошибка авторизации, значит пользователь не участвует
-        setParticipating(false);
-      }
+      const participationRes = await api.get(`/raffles/${id}/check-participation`);
+      setParticipating(participationRes.data.is_participating);
     } catch (error) {
       toast.error('Ошибка загрузки розыгрыша');
       navigate('/');
@@ -39,21 +35,47 @@ const RafflePage = () => {
     }
   };
 
+  const checkChannels = async () => {
+    setCheckingChannels(true);
+    const statuses = {};
+    
+    for (const channel of raffle.channels) {
+      try {
+        // This would be a real API call to check subscription
+        const isSubscribed = await checkChannelSubscription(channel);
+        statuses[channel] = isSubscribed;
+      } catch (error) {
+        statuses[channel] = false;
+      }
+    }
+    
+    setChannelStatuses(statuses);
+    setCheckingChannels(false);
+    return Object.values(statuses).every(status => status);
+  };
+
+  const checkChannelSubscription = async (channel) => {
+    // Simulate API call
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(Math.random() > 0.3); // 70% chance of being subscribed
+      }, 1000);
+    });
+  };
+
   const handleParticipate = async () => {
-    if (submitting) return;
-    
-    setSubmitting(true);
-    
     try {
       // Check username
       const user = WebApp.initDataUnsafe?.user;
       if (!user?.username) {
-        WebApp.showPopup({
-          title: 'Требуется username',
-          message: 'Для участия в розыгрыше необходимо установить имя пользователя (@username) в настройках Telegram',
-          buttons: [{ type: 'ok' }]
-        });
-        setSubmitting(false);
+        toast.error('Для участия необходимо установить имя пользователя (@username) в настройках Telegram');
+        return;
+      }
+
+      // Check channels
+      const allSubscribed = await checkChannels();
+      if (!allSubscribed) {
+        toast.error('Необходимо подписаться на все каналы');
         return;
       }
 
@@ -61,60 +83,28 @@ const RafflePage = () => {
       const response = await api.post(`/raffles/${id}/participate`);
       if (response.data.status === 'success') {
         toast.success('Вы успешно зарегистрированы!');
-        setParticipating(true);
         
         // Show success animation
         WebApp.HapticFeedback.notificationOccurred('success');
+        
+        // Redirect to home after 2 seconds
+        setTimeout(() => {
+          navigate('/');
+        }, 2000);
       }
     } catch (error) {
       if (error.response?.data?.detail) {
-        const errorDetail = error.response.data.detail;
-        
-        // Проверяем разные типы ошибок
-        if (errorDetail.includes('must be subscribed')) {
-          // Извлекаем название канала из ошибки
-          const channel = errorDetail.match(/@\w+/)?.[0] || 'канал';
-          WebApp.showPopup({
-            title: 'Требуется подписка',
-            message: `Для участия необходимо подписаться на ${channel}`,
-            buttons: [
-              { id: 'subscribe', type: 'default', text: 'Подписаться' },
-              { type: 'cancel' }
-            ]
-          }, (buttonId) => {
-            if (buttonId === 'subscribe') {
-              const channelName = channel.replace('@', '');
-              WebApp.openTelegramLink(`https://t.me/${channelName}`);
-            }
-          });
-        } else if (errorDetail.includes('Already participating')) {
-          toast.info('Вы уже участвуете в этом розыгрыше');
-          setParticipating(true);
-        } else {
-          toast.error(errorDetail);
-        }
+        toast.error(error.response.data.detail);
       } else {
         toast.error('Ошибка при регистрации');
       }
-    } finally {
-      setSubmitting(false);
     }
-  };
-
-  const formatImageUrl = (url) => {
-    if (!url) return '';
-    // Если URL начинается с /uploads, добавляем базовый URL API
-    if (url.startsWith('/uploads')) {
-      const baseUrl = process.env.REACT_APP_API_URL.replace('/api', '');
-      return `${baseUrl}${url}`;
-    }
-    return url;
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="spinner"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
@@ -127,15 +117,11 @@ const RafflePage = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Header Image */}
       {raffle.photo_url && (
-        <div className="h-64 overflow-hidden bg-gray-100">
+        <div className="h-64 overflow-hidden">
           <img 
-            src={formatImageUrl(raffle.photo_url)} 
+            src={raffle.photo_url} 
             alt={raffle.title}
             className="w-full h-full object-cover"
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.parentElement.style.display = 'none';
-            }}
           />
         </div>
       )}
@@ -143,26 +129,26 @@ const RafflePage = () => {
       <div className="container mx-auto px-4 py-6">
         <h1 className="text-3xl font-bold text-gray-800 mb-4">{raffle.title}</h1>
         
-        <div className="card mb-6">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Описание</h2>
           <p className="text-gray-700 whitespace-pre-wrap">{raffle.description}</p>
         </div>
 
         {/* Prizes */}
-        <div className="card mb-6">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">🏆 Призы</h2>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {Object.entries(raffle.prizes).map(([position, prize]) => (
-              <div key={position} className="prize-item">
-                <div className="prize-position">
-                  {position === '1' && <span className="medal-gold">🥇</span>}
-                  {position === '2' && <span className="medal-silver">🥈</span>}
-                  {position === '3' && <span className="medal-bronze">🥉</span>}
-                  {parseInt(position) > 3 && position}
+              <div key={position} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                <div className="text-2xl">
+                  {position === '1' && '🥇'}
+                  {position === '2' && '🥈'}
+                  {position === '3' && '🥉'}
+                  {parseInt(position) > 3 && '🏅'}
                 </div>
-                <div className="prize-details">
-                  <div className="prize-name">{prize}</div>
-                  <div className="prize-description">{position} место</div>
+                <div>
+                  <p className="font-semibold">{position} место</p>
+                  <p className="text-gray-700">{prize}</p>
                 </div>
               </div>
             ))}
@@ -170,31 +156,38 @@ const RafflePage = () => {
         </div>
 
         {/* Conditions */}
-        {raffle.channels && raffle.channels.length > 0 && (
-          <div className="card mb-6">
+        {raffle.channels.length > 0 && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <h2 className="text-xl font-semibold mb-4">📋 Условия участия</h2>
             <p className="text-gray-700 mb-4">
               Для участия в розыгрыше необходимо быть подписанным на следующие каналы:
             </p>
             <div className="space-y-2">
               {raffle.channels.map((channel) => (
-                <a 
-                  key={channel}
-                  href={`https://t.me/${channel.replace('@', '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <span className="text-blue-600 font-medium">{channel}</span>
-                  <span className="text-sm text-gray-500">Нажмите для перехода →</span>
-                </a>
+                <div key={channel} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <a 
+                    href={`https://t.me/${channel.replace('@', '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline font-medium"
+                  >
+                    {channel}
+                  </a>
+                  {channelStatuses[channel] !== undefined && (
+                    channelStatuses[channel] ? (
+                      <CheckIcon className="h-5 w-5 text-green-600" />
+                    ) : (
+                      <XMarkIcon className="h-5 w-5 text-red-600" />
+                    )
+                  )}
+                </div>
               ))}
             </div>
           </div>
         )}
 
         {/* End Date */}
-        <div className="card mb-6">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">⏰ До окончания розыгрыша</h2>
           <Countdown
             date={new Date(raffle.end_date)}
@@ -203,21 +196,21 @@ const RafflePage = () => {
                 return <p className="text-2xl text-red-600 font-bold">Розыгрыш завершен</p>;
               }
               return (
-                <div className="flex justify-center space-x-4">
+                <div className="flex space-x-4">
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">{days}</div>
+                    <div className="text-3xl font-bold text-blue-600">{days}</div>
                     <div className="text-sm text-gray-600">дней</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">{hours}</div>
+                    <div className="text-3xl font-bold text-blue-600">{hours}</div>
                     <div className="text-sm text-gray-600">часов</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">{minutes}</div>
+                    <div className="text-3xl font-bold text-blue-600">{minutes}</div>
                     <div className="text-sm text-gray-600">минут</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">{seconds}</div>
+                    <div className="text-3xl font-bold text-blue-600">{seconds}</div>
                     <div className="text-sm text-gray-600">секунд</div>
                   </div>
                 </div>
@@ -230,21 +223,14 @@ const RafflePage = () => {
         {!participating ? (
           <button
             onClick={handleParticipate}
-            disabled={submitting || new Date(raffle.end_date) < new Date()}
-            className="btn btn-accent btn-block"
+            disabled={checkingChannels}
+            className="w-full bg-blue-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? (
-              <>
-                <div className="spinner mr-2" style={{width: '20px', height: '20px'}}></div>
-                Проверка...
-              </>
-            ) : (
-              'Участвовать'
-            )}
+            {checkingChannels ? 'Проверка подписок...' : 'Участвовать'}
           </button>
         ) : (
-          <div className="success-message text-center">
-            ✅ Вы успешно участвуете в этом розыгрыше!
+          <div className="w-full bg-green-100 text-green-700 py-4 px-6 rounded-lg font-semibold text-lg text-center">
+            ✅ Вы уже участвуете в этом розыгрыше
           </div>
         )}
       </div>
