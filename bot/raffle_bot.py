@@ -30,8 +30,9 @@ from aiogram.exceptions import TelegramBadRequest
 load_dotenv()
 
 BOT_TOKEN  = os.getenv("BOT_TOKEN", "")
+# В файле bot/raffle_bot.py в начале файла:
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://raffle-app-qtma.onrender.com")
-API_URL    = os.getenv("API_URL",   "https://raffle-api.onrender.com")
+API_URL    = os.getenv("API_URL",   "https://raffle-api-y3im.onrender.com")
 ADMIN_IDS  = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
 
 # ────────────────────────────────
