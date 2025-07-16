@@ -555,12 +555,85 @@ async def process_description(message: types.Message, state: FSMContext):
     await state.set_state(RaffleStates.waiting_photo)
     await message.answer("Шаг 3/6: Отправьте фото для розыгрыша (или напишите 'пропустить'):")
 
+# В файле bot/raffle_bot.py нужно обновить функцию process_photo:
+
 @dp.message(RaffleStates.waiting_photo)
 async def process_photo(message: types.Message, state: FSMContext):
     """Обработка фото розыгрыша"""
     if message.photo:
         photo_file_id = message.photo[-1].file_id
-        await state.update_data(photo_file_id=photo_file_id, photo_url=photo_file_id)
+        
+        # Загружаем фото на сервер
+        try:
+            # Получаем файл из Telegram
+            file_info = await bot.get_file(photo_file_id)
+            file_path = file_info.file_path
+            
+            # Скачиваем файл
+            async with aiohttp.ClientSession() as session:
+                file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+                async with session.get(file_url) as resp:
+                    file_data = await resp.read()
+            
+            # Загружаем на наш сервер
+            async with aiohttp.ClientSession() as session:
+                # Формируем initData для авторизации
+                auth_date = int(time.time())
+                admin_data = {
+                    "id": str(ADMIN_IDS[0]),
+                    "first_name": "Admin",
+                    "username": "admin",
+                }
+                user_json = json.dumps(admin_data, separators=(",", ":"), ensure_ascii=False)
+                encoded_user = urllib.parse.quote(user_json)
+                
+                params = {
+                    "auth_date": str(auth_date),
+                    "user": user_json
+                }
+                
+                data_check_arr = []
+                for key in sorted(params.keys()):
+                    data_check_arr.append(f"{key}={params[key]}")
+                data_check_string = "\n".join(data_check_arr)
+                
+                secret_key = hmac.new(
+                    b"WebAppData",
+                    BOT_TOKEN.encode(),
+                    hashlib.sha256
+                ).digest()
+                
+                hash_value = hmac.new(
+                    secret_key,
+                    data_check_string.encode(),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+                
+                # Загружаем файл
+                form_data = aiohttp.FormData()
+                form_data.add_field('file', file_data, filename='photo.jpg', content_type='image/jpeg')
+                
+                headers = {
+                    "Authorization": f"Bearer {init_data}",
+                }
+                
+                async with session.post(f"{API_URL}/api/admin/upload-image", data=form_data, headers=headers, ssl=False) as resp:
+                    if resp.status in (200, 201):
+                        result = await resp.json()
+                        photo_url = API_URL + result['url']
+                        await state.update_data(photo_file_id=photo_file_id, photo_url=photo_url)
+                        await message.answer("✅ Фото загружено успешно!")
+                    else:
+                        await state.update_data(photo_file_id=photo_file_id, photo_url='')
+                        await message.answer("⚠️ Не удалось загрузить фото на сервер, но розыгрыш можно продолжить")
+                        
+        except Exception as e:
+            logger.error(f"Error uploading photo: {e}")
+            await state.update_data(photo_file_id=photo_file_id, photo_url='')
+            await message.answer("⚠️ Ошибка при загрузке фото, но розыгрыш можно продолжить")
+            
     elif message.text and message.text.lower() == 'пропустить':
         await state.update_data(photo_file_id=None, photo_url='')
     else:
