@@ -5,7 +5,7 @@ import { toast } from 'react-hot-toast';
 import WebApp from '@twa-dev/sdk';
 import api from '../services/api';
 import Countdown from 'react-countdown';
-
+import { useEffect } from "react";
 const RafflePage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -41,6 +41,7 @@ const RafflePage = () => {
     
     for (const channel of raffle.channels) {
       try {
+        // This would be a real API call to check subscription
         const isSubscribed = await checkChannelSubscription(channel);
         statuses[channel] = isSubscribed;
       } catch (error) {
@@ -53,15 +54,13 @@ const RafflePage = () => {
     return Object.values(statuses).every(status => status);
   };
 
-  // ──────────────────────────────────────────────
-  // Шаг 2: реальная проверка подписки через API
-  // ──────────────────────────────────────────────
   const checkChannelSubscription = async (channel) => {
-    const { data } = await api.get(
-      `/raffles/${id}/check-subscription`,
-      { params: { channel } }
-    );
-    return data.is_subscribed;  // backend возвращает {is_subscribed: true/false}
+    // Simulate API call
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(Math.random() > 0.3); // 70% chance of being subscribed
+      }, 1000);
+    });
   };
 
   const handleParticipate = async () => {
