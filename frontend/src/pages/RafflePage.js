@@ -5,7 +5,7 @@ import { toast } from 'react-hot-toast';
 import WebApp from '@twa-dev/sdk';
 import api from '../services/api';
 import Countdown from 'react-countdown';
-import { useEffect } from "react";
+
 const RafflePage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
