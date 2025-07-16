@@ -1,3 +1,5 @@
+// frontend/src/components/RaffleCard.js - ОБНОВЛЕННЫЙ ФАЙЛ
+
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Countdown from 'react-countdown';
@@ -25,25 +27,25 @@ const RaffleCard = ({ raffle }) => {
 
   const CountdownRenderer = ({ days, hours, minutes, seconds, completed }) => {
     if (completed) {
-      return <span className="text-red-500 font-semibold">Завершен</span>;
+      return <span className="text-red-600 font-semibold">Завершен</span>;
     } else {
       return (
         <div className="flex space-x-2 text-sm">
           <div className="text-center">
-            <div className="font-bold">{days}</div>
-            <div className="text-xs">дней</div>
+            <div className="font-bold text-gray-800">{days}</div>
+            <div className="text-xs text-gray-600">дней</div>
           </div>
           <div className="text-center">
-            <div className="font-bold">{hours}</div>
-            <div className="text-xs">часов</div>
+            <div className="font-bold text-gray-800">{hours}</div>
+            <div className="text-xs text-gray-600">часов</div>
           </div>
           <div className="text-center">
-            <div className="font-bold">{minutes}</div>
-            <div className="text-xs">минут</div>
+            <div className="font-bold text-gray-800">{minutes}</div>
+            <div className="text-xs text-gray-600">минут</div>
           </div>
           <div className="text-center">
-            <div className="font-bold">{seconds}</div>
-            <div className="text-xs">секунд</div>
+            <div className="font-bold text-gray-800">{seconds}</div>
+            <div className="text-xs text-gray-600">секунд</div>
           </div>
         </div>
       );
@@ -70,7 +72,7 @@ const RaffleCard = ({ raffle }) => {
           <div className="space-y-1">
             {Object.entries(raffle.prizes).slice(0, 3).map(([position, prize]) => (
               <div key={position} className="text-sm">
-                <span className="font-medium">{position} место:</span> {prize}
+                <span className="font-medium text-gray-700">{position} место:</span> <span className="text-gray-600">{prize}</span>
               </div>
             ))}
             {Object.keys(raffle.prizes).length > 3 && (
@@ -91,23 +93,25 @@ const RaffleCard = ({ raffle }) => {
           </div>
           <div className="text-right">
             <p className="text-sm text-gray-600">Участников:</p>
-            <p className="text-lg font-semibold">{raffle.participants_count || 0}</p>
+            <p className="text-lg font-semibold text-gray-800">{raffle.participants_count || 0}</p>
           </div>
         </div>
 
         {loading ? (
           <div className="h-10 bg-gray-200 animate-pulse rounded"></div>
-        ) : isParticipating ? (
-          <div className="flex items-center justify-center space-x-2 bg-green-100 text-green-700 py-2 px-4 rounded-lg">
-            <CheckCircleIcon className="h-5 w-5" />
-            <span className="font-medium">Вы участвуете</span>
-          </div>
         ) : (
           <Link 
             to={`/raffle/${raffle.id}`}
             className="block w-full text-center bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium"
           >
-            Участвовать
+            {isParticipating ? (
+              <span className="flex items-center justify-center space-x-2">
+                <CheckCircleIcon className="h-5 w-5" />
+                <span>Подробнее (вы участвуете)</span>
+              </span>
+            ) : (
+              'Участвовать'
+            )}
           </Link>
         )}
       </div>

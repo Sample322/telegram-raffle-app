@@ -1,3 +1,5 @@
+// frontend/src/pages/HomePage.js - ОБНОВЛЕННЫЙ ФАЙЛ
+
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
@@ -20,7 +22,14 @@ function HomePage() {
         api.get('/raffles/completed?limit=10')
       ]);
       
-      setActiveRaffles(activeRes.data);
+      // Дополнительная фильтрация на клиенте для уверенности
+      const now = new Date();
+      const filteredActive = activeRes.data.filter(raffle => {
+        const endDate = new Date(raffle.end_date);
+        return !raffle.is_completed && raffle.is_active && endDate > now;
+      });
+      
+      setActiveRaffles(filteredActive);
       setCompletedRaffles(completedRes.data);
     } catch (error) {
       console.error('Error loading raffles:', error);
@@ -31,7 +40,7 @@ function HomePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );

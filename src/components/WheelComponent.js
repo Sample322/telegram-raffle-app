@@ -1,3 +1,5 @@
+// frontend/src/components/WheelComponent.js - ИСПРАВЛЕННЫЙ ФАЙЛ
+
 import React, { useEffect, useRef } from 'react';
 
 const WheelComponent = ({ participants, isSpinning, onComplete }) => {
@@ -8,6 +10,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
     
     // Set canvas size
@@ -18,13 +22,15 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
   }, [participants]);
 
   useEffect(() => {
-    if (isSpinning) {
+    if (isSpinning && participants.length > 0) {
       startSpin();
     }
-  }, [isSpinning]);
+  }, [isSpinning, participants]);
 
   const drawWheel = () => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
@@ -32,6 +38,21 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (participants.length === 0) {
+      // Draw empty wheel
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Нет участников', centerX, centerY);
+      return;
+    }
 
     // Draw wheel segments
     const segmentAngle = (2 * Math.PI) / participants.length;
@@ -47,7 +68,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
       ctx.closePath();
       
       // Alternate colors
-      ctx.fillStyle = index % 2 === 0 ? '#3B82F6' : '#8B5CF6';
+      const colors = ['#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444'];
+      ctx.fillStyle = colors[index % colors.length];
       ctx.fill();
       
       // Draw border
@@ -59,10 +81,22 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(startAngle + segmentAngle / 2);
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 14px Arial';
-      ctx.fillText(participant.username, radius * 0.7, 0);
+      
+      // Get display name
+      const displayName = participant.username || 
+                         `${participant.first_name || ''} ${participant.last_name || ''}`.trim() ||
+                         'Участник';
+      
+      // Truncate long names
+      const maxLength = 15;
+      const truncatedName = displayName.length > maxLength 
+        ? displayName.substring(0, maxLength - 3) + '...' 
+        : displayName;
+      
+      ctx.fillText(truncatedName, radius * 0.3, 5);
       ctx.restore();
     });
 
@@ -71,18 +105,26 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
     ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
     ctx.fillStyle = '#1F2937';
     ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    // Draw pointer
+    // Draw pointer triangle at top
     ctx.beginPath();
-    ctx.moveTo(centerX - 20, 50);
-    ctx.lineTo(centerX + 20, 50);
-    ctx.lineTo(centerX, 80);
+    ctx.moveTo(centerX - 20, 30);
+    ctx.lineTo(centerX + 20, 30);
+    ctx.lineTo(centerX, 60);
     ctx.closePath();
     ctx.fillStyle = '#EF4444';
     ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   };
 
   const startSpin = () => {
+    if (participants.length === 0) return;
+    
     velocityRef.current = 20 + Math.random() * 10; // Random initial velocity
     animate();
   };
@@ -97,21 +139,33 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
       animationRef.current = requestAnimationFrame(animate);
     } else {
       // Animation complete
-      const selectedIndex = Math.floor(
-        ((2 * Math.PI - (angleRef.current % (2 * Math.PI))) / (2 * Math.PI)) * participants.length
-      ) % participants.length;
+      const normalizedAngle = angleRef.current % (2 * Math.PI);
+      const adjustedAngle = (2 * Math.PI - normalizedAngle + Math.PI / 2) % (2 * Math.PI);
+      const segmentAngle = (2 * Math.PI) / participants.length;
+      const selectedIndex = Math.floor(adjustedAngle / segmentAngle) % participants.length;
       
-      onComplete(participants[selectedIndex]);
+      if (onComplete && participants[selectedIndex]) {
+        onComplete(participants[selectedIndex]);
+      }
     }
   };
 
   return (
-    <div className="relative">
-      <canvas ref={canvasRef} className="mx-auto" />
-      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg">
-        <p className="text-sm font-semibold">
-          {isSpinning ? 'Вращается...' : 'Ожидание...'}
+    <div className="relative flex flex-col items-center">
+      <canvas 
+        ref={canvasRef} 
+        className="mx-auto" 
+        style={{ maxWidth: '100%', height: 'auto' }}
+      />
+      <div className="mt-4 text-center">
+        <p className="text-sm font-semibold text-gray-600">
+          {isSpinning ? 'Колесо вращается...' : 'Ожидание розыгрыша...'}
         </p>
+        {participants.length > 0 && (
+          <p className="text-xs text-gray-500 mt-1">
+            Участников: {participants.length}
+          </p>
+        )}
       </div>
     </div>
   );
