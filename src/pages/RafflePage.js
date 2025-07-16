@@ -1,6 +1,8 @@
+// frontend/src/pages/RafflePage.js - ОБНОВЛЕННЫЙ ФАЙЛ
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { CheckIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { CheckIcon, XMarkIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 import WebApp from '@twa-dev/sdk';
 import api from '../services/api';
@@ -83,14 +85,10 @@ const RafflePage = () => {
       const response = await api.post(`/raffles/${id}/participate`);
       if (response.data.status === 'success') {
         toast.success('Вы успешно зарегистрированы!');
+        setParticipating(true);
         
         // Show success animation
         WebApp.HapticFeedback.notificationOccurred('success');
-        
-        // Redirect to home after 2 seconds
-        setTimeout(() => {
-          navigate('/');
-        }, 2000);
       }
     } catch (error) {
       if (error.response?.data?.detail) {
@@ -115,6 +113,20 @@ const RafflePage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Navigation Header */}
+      <div className="sticky top-0 z-50 bg-white shadow-sm">
+        <div className="container mx-auto px-4 py-3 flex items-center">
+          <button
+            onClick={() => navigate('/')}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            aria-label="Назад"
+          >
+            <ArrowLeftIcon className="h-5 w-5 text-gray-700" />
+          </button>
+          <h1 className="ml-3 text-lg font-semibold text-gray-800 truncate">{raffle.title}</h1>
+        </div>
+      </div>
+
       {/* Header Image */}
       {raffle.photo_url && (
         <div className="h-64 overflow-hidden">
@@ -130,13 +142,13 @@ const RafflePage = () => {
         <h1 className="text-3xl font-bold text-gray-800 mb-4">{raffle.title}</h1>
         
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Описание</h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Описание</h2>
           <p className="text-gray-700 whitespace-pre-wrap">{raffle.description}</p>
         </div>
 
         {/* Prizes */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">🏆 Призы</h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">🏆 Призы</h2>
           <div className="space-y-3">
             {Object.entries(raffle.prizes).map(([position, prize]) => (
               <div key={position} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
@@ -147,7 +159,7 @@ const RafflePage = () => {
                   {parseInt(position) > 3 && '🏅'}
                 </div>
                 <div>
-                  <p className="font-semibold">{position} место</p>
+                  <p className="font-semibold text-gray-800">{position} место</p>
                   <p className="text-gray-700">{prize}</p>
                 </div>
               </div>
@@ -158,7 +170,7 @@ const RafflePage = () => {
         {/* Conditions */}
         {raffle.channels.length > 0 && (
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">📋 Условия участия</h2>
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">📋 Условия участия</h2>
             <p className="text-gray-700 mb-4">
               Для участия в розыгрыше необходимо быть подписанным на следующие каналы:
             </p>
@@ -188,7 +200,7 @@ const RafflePage = () => {
 
         {/* End Date */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">⏰ До окончания розыгрыша</h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">⏰ До окончания розыгрыша</h2>
           <Countdown
             date={new Date(raffle.end_date)}
             renderer={({ days, hours, minutes, seconds, completed }) => {
