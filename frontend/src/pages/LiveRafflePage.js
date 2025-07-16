@@ -1,11 +1,14 @@
+// frontend/src/pages/LiveRafflePage.js - ИСПРАВЛЕННЫЙ ФАЙЛ
+
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import WheelComponent from '../components/WheelComponent';
-import { io } from 'socket.io-client';
 
 function LiveRafflePage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [raffle, setRaffle] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [currentRound, setCurrentRound] = useState(null);
@@ -13,6 +16,7 @@ function LiveRafflePage() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [socket, setSocket] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadRaffleData();
@@ -20,7 +24,7 @@ function LiveRafflePage() {
 
     return () => {
       if (socket) {
-        socket.disconnect();
+        socket.close();
       }
     };
   }, [id]);
@@ -34,47 +38,64 @@ function LiveRafflePage() {
       
       setRaffle(raffleRes.data);
       setParticipants(participantsRes.data);
+      setLoading(false);
     } catch (error) {
       console.error('Error loading raffle:', error);
+      setLoading(false);
     }
   };
 
   const connectWebSocket = () => {
-    const ws = io(process.env.REACT_APP_WS_URL || 'ws://localhost:8000', {
-      path: `/ws/raffle/${id}`
-    });
+    const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
+    const ws = new WebSocket(wsUrl);
 
-    ws.on('connect', () => {
+    ws.onopen = () => {
       console.log('Connected to WebSocket');
-    });
+    };
 
-    ws.on('wheel_start', (data) => {
-      setCurrentRound({
-        position: data.position,
-        prize: data.prize,
-        participants: data.participants
-      });
-      setIsSpinning(true);
-    });
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch (data.type) {
+        case 'wheel_start':
+          setCurrentRound({
+            position: data.position,
+            prize: data.prize,
+            participants: data.participants
+          });
+          setIsSpinning(true);
+          break;
+          
+        case 'winner_selected':
+          setWinners(prev => [...prev, data]);
+          setIsSpinning(false);
+          break;
+          
+        case 'raffle_complete':
+          setWinners(data.winners);
+          break;
+          
+        case 'countdown':
+          setCountdown(data.seconds);
+          break;
+          
+        default:
+          break;
+      }
+    };
 
-    ws.on('winner_selected', (data) => {
-      setWinners(prev => [...prev, data]);
-      setIsSpinning(false);
-    });
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
 
-    ws.on('raffle_complete', (data) => {
-      setWinners(data.winners);
-      // Show completion message
-    });
-
-    ws.on('countdown', (data) => {
-      setCountdown(data.seconds);
-    });
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
 
     setSocket(ws);
   };
 
-  if (!raffle) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
@@ -82,12 +103,40 @@ function LiveRafflePage() {
     );
   }
 
+  if (!raffle) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="container mx-auto">
+          <p className="text-center text-gray-600">Розыгрыш не найден</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Format participant data for the wheel
+  const wheelParticipants = currentRound?.participants || participants.map(p => ({
+    id: p.telegram_id,
+    username: p.username || `${p.first_name} ${p.last_name || ''}`.trim()
+  }));
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white p-4">
-      <div className="container mx-auto">
-        <h1 className="text-4xl font-bold text-center mb-8">{raffle.title}</h1>
-        
-        {countdown && (
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
+      {/* Navigation Header */}
+      <div className="sticky top-0 z-50 bg-white/10 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-3 flex items-center">
+          <button
+            onClick={() => navigate('/')}
+            className="p-2 rounded-lg hover:bg-white/20 transition-colors"
+            aria-label="Назад"
+          >
+            <ArrowLeftIcon className="h-5 w-5 text-white" />
+          </button>
+          <h1 className="ml-3 text-lg font-semibold text-white truncate">{raffle.title}</h1>
+        </div>
+      </div>
+
+      <div className="container mx-auto p-4">
+        {countdown && countdown > 0 && (
           <div className="text-center mb-8">
             <p className="text-2xl">Розыгрыш начнется через:</p>
             <p className="text-6xl font-bold">{countdown}</p>
@@ -107,12 +156,17 @@ function LiveRafflePage() {
             )}
             
             <div className="bg-white rounded-lg p-8">
-              {currentRound && (
+              {wheelParticipants.length > 0 ? (
                 <WheelComponent
-                  participants={currentRound.participants}
+                  participants={wheelParticipants}
                   isSpinning={isSpinning}
                   onComplete={(winner) => console.log('Winner:', winner)}
                 />
+              ) : (
+                <div className="text-center text-gray-600 py-20">
+                  <p className="text-xl mb-4">Ожидание участников...</p>
+                  <p>Текущее количество участников: {participants.length}</p>
+                </div>
               )}
             </div>
           </div>
@@ -128,7 +182,7 @@ function LiveRafflePage() {
                     <div className="font-semibold">{position} место: {raffle.prizes[position]}</div>
                     {winner && (
                       <div className="text-lg mt-1">
-                        🎉 @{winner.winner.username}
+                        🎉 @{winner.winner?.username || winner.user?.username || 'Победитель'}
                       </div>
                     )}
                   </div>
@@ -138,9 +192,16 @@ function LiveRafflePage() {
           </div>
         </div>
 
-        {/* Participants Count */}
-        <div className="text-center mt-8">
-          <p className="text-xl">Всего участников: {participants.length}</p>
+        {/* Participants List */}
+        <div className="mt-8 bg-white/10 backdrop-blur rounded-lg p-6">
+          <h3 className="text-xl font-semibold mb-4">Участники ({participants.length})</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {participants.map((participant) => (
+              <div key={participant.id} className="bg-white/5 rounded px-3 py-2 text-sm">
+                @{participant.username || `${participant.first_name} ${participant.last_name || ''}`.trim()}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
