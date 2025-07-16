@@ -41,7 +41,6 @@ const RafflePage = () => {
     
     for (const channel of raffle.channels) {
       try {
-        // This would be a real API call to check subscription
         const isSubscribed = await checkChannelSubscription(channel);
         statuses[channel] = isSubscribed;
       } catch (error) {
@@ -54,13 +53,15 @@ const RafflePage = () => {
     return Object.values(statuses).every(status => status);
   };
 
+  // ──────────────────────────────────────────────
+  // Шаг 2: реальная проверка подписки через API
+  // ──────────────────────────────────────────────
   const checkChannelSubscription = async (channel) => {
-    // Simulate API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(Math.random() > 0.3); // 70% chance of being subscribed
-      }, 1000);
-    });
+    const { data } = await api.get(
+      `/raffles/${id}/check-subscription`,
+      { params: { channel } }
+    );
+    return data.is_subscribed;  // backend возвращает {is_subscribed: true/false}
   };
 
   const handleParticipate = async () => {
