@@ -553,14 +553,81 @@ async def show_info(message: types.Message):
     )
 
 # Обработчики для администраторов
-@dp.message(F.text == "➕ Создать розыгрыш", F.from_user.id.in_(ADMIN_IDS))
-async def create_raffle_start(message: types.Message, state: FSMContext):
-    """Начало создания розыгрыша"""
-    await state.set_state(RaffleStates.waiting_title)
+@dp.message(RaffleStates.waiting_photo)
+async def process_photo(message: types.Message, state: FSMContext):
+    """Обработка фото розыгрыша"""
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id
+        
+        # Загружаем фото на сервер через API
+        try:
+            admin_data = {
+                "id": str(ADMIN_IDS[0]),
+                "first_name": "Admin",
+                "username": "admin",
+            }
+            
+            auth_date = int(time.time())
+            user_json = json.dumps(admin_data, separators=(",", ":"), ensure_ascii=False)
+            encoded_user = urllib.parse.quote(user_json)
+            
+            params = {
+                "auth_date": str(auth_date),
+                "user": user_json
+            }
+            
+            data_check_arr = []
+            for key in sorted(params.keys()):
+                data_check_arr.append(f"{key}={params[key]}")
+            data_check_string = "\n".join(data_check_arr)
+            
+            secret_key = hmac.new(
+                b"WebAppData",
+                BOT_TOKEN.encode(),
+                hashlib.sha256
+            ).digest()
+            
+            hash_value = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {init_data}",
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{API_URL}/api/admin/upload-telegram-photo",
+                    json={"file_id": photo_file_id},
+                    headers=headers,
+                    ssl=False
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        photo_url = f"{API_URL}{data['url']}"
+                        await state.update_data(photo_file_id=photo_file_id, photo_url=photo_url)
+                    else:
+                        await state.update_data(photo_file_id=photo_file_id, photo_url='')
+        except Exception as e:
+            logger.error(f"Error uploading photo: {e}")
+            await state.update_data(photo_file_id=photo_file_id, photo_url='')
+            
+    elif message.text and message.text.lower() == 'пропустить':
+        await state.update_data(photo_file_id=None, photo_url='')
+    else:
+        await message.answer("Пожалуйста, отправьте фото или напишите 'пропустить'")
+        return
+    
+    await state.set_state(RaffleStates.waiting_channels)
     await message.answer(
-        "🎯 Создание нового розыгрыша\n\n"
-        "Шаг 1/6: Введите название розыгрыша:",
-        reply_markup=types.ReplyKeyboardRemove()
+        "Шаг 4/6: Введите каналы для обязательной подписки\n"
+        "Формат: @channel1 @channel2 @channel3\n"
+        "(или напишите 'пропустить' если подписка не требуется)"
     )
 
 @dp.message(RaffleStates.waiting_title)
@@ -712,16 +779,18 @@ async def process_prize_details(message: types.Message, state: FSMContext):
 async def process_end_datetime(message: types.Message, state: FSMContext):
     """Обработка даты и времени завершения"""
     try:
-        # Парсим дату и время
+        # Парсим дату и время (считаем что пользователь вводит московское время)
         end_date = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
         
         # Проверяем, что дата в будущем
-        if end_date <= datetime.now():
+        moscow_now = datetime.now()
+        if end_date <= moscow_now:
             await message.answer("❌ Дата должна быть в будущем! Попробуйте еще раз:")
             return
         
         # Получаем все данные
         data = await state.get_data()
+        # Сохраняем как есть - сервер должен интерпретировать это как московское время
         data['end_date'] = end_date
         
         # Создаем розыгрыш через API
@@ -750,7 +819,7 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
             await message.answer(
                 "✅ Розыгрыш успешно создан!\n\n"
                 f"📋 Название: {data['title']}\n"
-                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')}\n"
+                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')} (МСК)\n"
                 f"🏆 Призовых мест: {data['prizes_count']}\n\n"
                 "⏰ Результаты будут подведены автоматически!\n\n"
                 "Сейчас начнется рассылка уведомлений...",

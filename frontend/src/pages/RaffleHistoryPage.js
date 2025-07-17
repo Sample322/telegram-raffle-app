@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
-
+import { formatToMoscowTime } from '../utils/dateUtils';
 const RaffleHistoryPage = () => {
   const { id } = useParams();
   const [raffle, setRaffle] = useState(null);
@@ -26,14 +26,7 @@ const RaffleHistoryPage = () => {
   };
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  return formatToMoscowTime(dateString);
   };
 
   if (loading) {

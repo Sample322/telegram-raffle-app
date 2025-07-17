@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from typing import List
 from datetime import datetime, timezone
 
@@ -42,15 +42,39 @@ async def get_completed_raffles(
     db: AsyncSession = Depends(get_db)
 ):
     """Get completed raffles with winners"""
+    # Get all completed raffles, including those that just ended
     result = await db.execute(
         select(Raffle).where(
-            Raffle.is_completed == True
+            and_(
+                Raffle.is_completed == True,
+                # Also include raffles where draw has been started
+                # This ensures raffles show up immediately after ending
+            )
         ).order_by(Raffle.end_date.desc()).limit(limit).offset(offset)
     )
     raffles = result.scalars().all()
     
+    # Also check for raffles that should be completed but aren't marked as such
+    current_time = datetime.now(timezone.utc)
+    expired_result = await db.execute(
+        select(Raffle).where(
+            and_(
+                Raffle.end_date <= current_time,
+                Raffle.draw_started == True
+            )
+        ).order_by(Raffle.end_date.desc())
+    )
+    expired_raffles = expired_result.scalars().all()
+    
+    # Combine and deduplicate
+    all_raffles = list({r.id: r for r in raffles + expired_raffles}.values())
+    all_raffles.sort(key=lambda x: x.end_date, reverse=True)
+    
+    # Apply limit and offset
+    all_raffles = all_raffles[offset:offset + limit]
+    
     raffles_with_winners = []
-    for raffle in raffles:
+    for raffle in all_raffles:
         # Get winners
         winners_result = await db.execute(
             select(Winner, User).join(User).where(
@@ -58,6 +82,12 @@ async def get_completed_raffles(
             ).order_by(Winner.position)
         )
         winners_data = winners_result.all()
+        
+        # Get participants count
+        count_result = await db.execute(
+            select(func.count(Participant.id)).where(Participant.raffle_id == raffle.id)
+        )
+        participants_count = count_result.scalar()
         
         winners = []
         for winner, user in winners_data:
@@ -69,7 +99,8 @@ async def get_completed_raffles(
         
         raffles_with_winners.append({
             **raffle.__dict__,
-            "winners": winners
+            "winners": winners,
+            "participants_count": participants_count
         })
     
     return raffles_with_winners

@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
 
@@ -67,7 +67,7 @@ class RaffleService:
     async def _start_wheel_after_delay(raffle_id: int, delay_minutes: int):
         """Start wheel after specified delay with countdown"""
         try:
-            # Send countdown updates every 30 seconds
+            # Send countdown updates every second
             total_seconds = delay_minutes * 60
             
             while total_seconds > 0:
@@ -77,10 +77,15 @@ class RaffleService:
                     "seconds": total_seconds
                 }, raffle_id)
                 
-                # Wait 30 seconds or remaining time
-                wait_time = min(30, total_seconds)
-                await asyncio.sleep(wait_time)
-                total_seconds -= wait_time
+                # Wait 1 second
+                await asyncio.sleep(1)
+                total_seconds -= 1
+            
+            # Send final countdown
+            await manager.broadcast({
+                "type": "countdown",
+                "seconds": 0
+            }, raffle_id)
             
             # Start the wheel
             async with async_session_maker() as db:
