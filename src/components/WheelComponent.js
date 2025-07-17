@@ -29,25 +29,20 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
     }
   }, [isSpinning, participants]);
 
-  const getCurrentSegmentIndex = () => {
-    if (participants.length === 0) return -1;
-    
-    // Normalize angle to [0, 2π]
-    const normalizedAngle = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-    
-    // The pointer is at the top (π/2), so we need to calculate which segment is there
-    // We need to add π/2 to the angle because the pointer is at the top
-    const pointerAngle = (normalizedAngle + Math.PI / 2) % (2 * Math.PI);
-    
-    // Calculate segment size
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    
-    // Find which segment is under the pointer
-    // We need to reverse the calculation because wheel rotates counter-clockwise
-    const segmentIndex = Math.floor(pointerAngle / segmentAngle);
-    
-    return segmentIndex % participants.length;
-  };
+ const getCurrentSegmentIndex = () => {
+  if (participants.length === 0) return -1;
+
+  // Нормализуем текущий угол в диапазон [0, 2π)
+  const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+  // Угол между стрелкой (π/2 против часовой) и текущим поворотом колеса
+  // → получаем «угол, на который смотрит стрелка» в системе Canvas
+  const pointerAngle = (Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
+
+  const segmentAngle = (2 * Math.PI) / participants.length;
+  return Math.floor(pointerAngle / segmentAngle);      // индекс правильного сектора
+};
+
 
   const updateCurrentParticipant = () => {
     const index = getCurrentSegmentIndex();
