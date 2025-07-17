@@ -33,26 +33,42 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
  const getCurrentSegmentIndex = () => {
   if (participants.length === 0) return -1;
 
-  // угол колеса в диапазоне [0‥2π)
-  const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  // Нормализуем угол колеса к диапазону [0, 2π)
+  let normalizedAngle = angleRef.current % (2 * Math.PI);
+  if (normalizedAngle < 0) {
+    normalizedAngle += 2 * Math.PI;
+  }
 
-  // «угол, куда смотрит стрелка»  =  3π/2  −  угол колеса
-  const pointerAngle = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
-
+  // Стрелка находится сверху (270° или 3π/2)
+  // При вращении колеса по часовой стрелке сегменты движутся против часовой стрелки относительно стрелки
+  // Поэтому нужно вычислить, какой сегмент сейчас находится под стрелкой
+  
   const segmentAngle = (2 * Math.PI) / participants.length;
-  return Math.floor(pointerAngle / segmentAngle);
+  
+  // Смещаем на половину сегмента, чтобы правильно определить границы
+  const adjustedAngle = (normalizedAngle + segmentAngle / 2) % (2 * Math.PI);
+  
+  // Вычисляем индекс сегмента
+  // Поскольку сегменты нумеруются от 0 и идут по часовой стрелке от начального угла
+  const index = Math.floor(adjustedAngle / segmentAngle);
+  
+  // Корректируем индекс с учетом направления
+  const correctedIndex = (participants.length - index) % participants.length;
+  
+  return correctedIndex;
 };
 
 
-  const updateCurrentParticipant = () => {
-    const index = getCurrentSegmentIndex();
-    if (index >= 0 && index < participants.length) {
-      const participant = participants[index];
-      if (!currentParticipant || participant.id !== currentParticipant.id) {
-        setCurrentParticipant(participant);
-      }
+ const updateCurrentParticipant = () => {
+  const index = getCurrentSegmentIndex();
+  if (index >= 0 && index < participants.length) {
+    const participant = participants[index];
+    if (!currentParticipant || participant.id !== currentParticipant.id) {
+      console.log('Current participant:', participant.username || participant.first_name, 'Index:', index); // Для отладки
+      setCurrentParticipant(participant);
     }
-  };
+  }
+};
 
   const drawWheel = () => {
     const canvas = canvasRef.current;
@@ -213,6 +229,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
   }
   
   drawWheel();
+  updateCurrentParticipant();
   
   if (velocityRef.current > 0.05) {
     animationRef.current = requestAnimationFrame(animate);
