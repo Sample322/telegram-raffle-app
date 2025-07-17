@@ -1,5 +1,3 @@
-// frontend/src/pages/RafflePage.js - ОБНОВЛЕННЫЙ ФАЙЛ
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckIcon, XMarkIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
@@ -14,8 +12,6 @@ const RafflePage = () => {
   const [raffle, setRaffle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [participating, setParticipating] = useState(false);
-  const [channelStatuses, setChannelStatuses] = useState({});
-  const [checkingChannels, setCheckingChannels] = useState(false);
 
   useEffect(() => {
     loadRaffle();
@@ -37,34 +33,6 @@ const RafflePage = () => {
     }
   };
 
-  const checkChannels = async () => {
-    setCheckingChannels(true);
-    const statuses = {};
-    
-    for (const channel of raffle.channels) {
-      try {
-        // This would be a real API call to check subscription
-        const isSubscribed = await checkChannelSubscription(channel);
-        statuses[channel] = isSubscribed;
-      } catch (error) {
-        statuses[channel] = false;
-      }
-    }
-    
-    setChannelStatuses(statuses);
-    setCheckingChannels(false);
-    return Object.values(statuses).every(status => status);
-  };
-
-  const checkChannelSubscription = async (channel) => {
-    // Simulate API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(Math.random() > 0.3); // 70% chance of being subscribed
-      }, 1000);
-    });
-  };
-
   const handleParticipate = async () => {
     try {
       // Check username
@@ -74,14 +42,7 @@ const RafflePage = () => {
         return;
       }
 
-      // Check channels
-      const allSubscribed = await checkChannels();
-      if (!allSubscribed) {
-        toast.error('Необходимо подписаться на все каналы');
-        return;
-      }
-
-      // Participate
+      // Participate (server will check channels)
       const response = await api.post(`/raffles/${id}/participate`);
       if (response.data.status === 'success') {
         toast.success('Вы успешно зарегистрированы!');
@@ -89,6 +50,9 @@ const RafflePage = () => {
         
         // Show success animation
         WebApp.HapticFeedback.notificationOccurred('success');
+        
+        // Reload raffle data
+        await loadRaffle();
       }
     } catch (error) {
       if (error.response?.data?.detail) {
@@ -121,7 +85,7 @@ const RafflePage = () => {
             className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
             aria-label="Назад"
           >
-            <ArrowLeftIcon className="h-5 w-5 text-gray-700" />
+            <ArrowLeftIcon className="h-5 w-5 text-gray-600" />
           </button>
           <h1 className="ml-3 text-lg font-semibold text-gray-800 truncate">{raffle.title}</h1>
         </div>
@@ -142,13 +106,13 @@ const RafflePage = () => {
         <h1 className="text-3xl font-bold text-gray-800 mb-4">{raffle.title}</h1>
         
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Описание</h2>
+          <h2 className="text-xl font-semibold mb-4">Описание</h2>
           <p className="text-gray-700 whitespace-pre-wrap">{raffle.description}</p>
         </div>
 
         {/* Prizes */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">🏆 Призы</h2>
+          <h2 className="text-xl font-semibold mb-4">🏆 Призы</h2>
           <div className="space-y-3">
             {Object.entries(raffle.prizes).map(([position, prize]) => (
               <div key={position} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
@@ -159,7 +123,7 @@ const RafflePage = () => {
                   {parseInt(position) > 3 && '🏅'}
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-800">{position} место</p>
+                  <p className="font-semibold">{position} место</p>
                   <p className="text-gray-700">{prize}</p>
                 </div>
               </div>
@@ -170,7 +134,7 @@ const RafflePage = () => {
         {/* Conditions */}
         {raffle.channels.length > 0 && (
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">📋 Условия участия</h2>
+            <h2 className="text-xl font-semibold mb-4">📋 Условия участия</h2>
             <p className="text-gray-700 mb-4">
               Для участия в розыгрыше необходимо быть подписанным на следующие каналы:
             </p>
@@ -185,13 +149,6 @@ const RafflePage = () => {
                   >
                     {channel}
                   </a>
-                  {channelStatuses[channel] !== undefined && (
-                    channelStatuses[channel] ? (
-                      <CheckIcon className="h-5 w-5 text-green-600" />
-                    ) : (
-                      <XMarkIcon className="h-5 w-5 text-red-600" />
-                    )
-                  )}
                 </div>
               ))}
             </div>
@@ -200,7 +157,7 @@ const RafflePage = () => {
 
         {/* End Date */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">⏰ До окончания розыгрыша</h2>
+          <h2 className="text-xl font-semibold mb-4">⏰ До окончания розыгрыша</h2>
           <Countdown
             date={new Date(raffle.end_date)}
             renderer={({ days, hours, minutes, seconds, completed }) => {
@@ -235,10 +192,9 @@ const RafflePage = () => {
         {!participating ? (
           <button
             onClick={handleParticipate}
-            disabled={checkingChannels}
-            className="w-full bg-blue-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-blue-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 transition-colors duration-200"
           >
-            {checkingChannels ? 'Проверка подписок...' : 'Участвовать'}
+            Участвовать
           </button>
         ) : (
           <div className="w-full bg-green-100 text-green-700 py-4 px-6 rounded-lg font-semibold text-lg text-center">

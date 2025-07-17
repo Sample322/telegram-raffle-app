@@ -2,11 +2,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timedelta
 import asyncio
+import logging
 
 from ..database import async_session_maker
 from ..models import Raffle, Participant, User
 from ..services.telegram import TelegramService
-from ..routers.websocket import RaffleWheel
+from ..services.notifications import NotificationService
+from ..websocket_manager import manager
+
+logger = logging.getLogger(__name__)
 
 class RaffleService:
     @staticmethod
@@ -41,28 +45,15 @@ class RaffleService:
                 if len(participants) < len(raffle.prizes):
                     # Not enough participants, cancel raffle
                     raffle.is_active = False
+                    raffle.is_completed = True
                     await db.commit()
+                    
+                    # Notify about cancellation
+                    logger.warning(f"Raffle {raffle.id} cancelled due to insufficient participants")
                     continue
                 
                 # Notify users that draw will start
-                user_ids = [p.telegram_id for p in participants]
-                
-                # Also notify users with notifications enabled
-                notif_users_result = await db.execute(
-                    select(User).where(User.notifications_enabled == True)
-                )
-                notif_users = notif_users_result.scalars().all()
-                
-                all_user_ids = list(set(user_ids + [u.telegram_id for u in notif_users]))
-                
-                await TelegramService.notify_raffle_start(
-                    raffle.id,
-                    all_user_ids,
-                    {
-                        "title": raffle.title,
-                        "photo_url": raffle.photo_url
-                    }
-                )
+                await NotificationService.notify_raffle_starting(raffle.id)
                 
                 # Schedule wheel start after delay
                 asyncio.create_task(
@@ -74,8 +65,37 @@ class RaffleService:
     
     @staticmethod
     async def _start_wheel_after_delay(raffle_id: int, delay_minutes: int):
-        """Start wheel after specified delay"""
-        await asyncio.sleep(delay_minutes * 60)
-        
-        async with async_session_maker() as db:
-            await RaffleWheel.run_wheel(raffle_id, db)
+        """Start wheel after specified delay with countdown"""
+        try:
+            # Send countdown updates every 30 seconds
+            total_seconds = delay_minutes * 60
+            
+            while total_seconds > 0:
+                # Send countdown to all connected clients
+                await manager.broadcast({
+                    "type": "countdown",
+                    "seconds": total_seconds
+                }, raffle_id)
+                
+                # Wait 30 seconds or remaining time
+                wait_time = min(30, total_seconds)
+                await asyncio.sleep(wait_time)
+                total_seconds -= wait_time
+            
+            # Start the wheel
+            async with async_session_maker() as db:
+                # Import here to avoid circular import
+                from ..routers.websocket import RaffleWheel
+                
+                # Check if raffle is still active
+                result = await db.execute(
+                    select(Raffle).where(Raffle.id == raffle_id)
+                )
+                raffle = result.scalar_one_or_none()
+                
+                if raffle and not raffle.is_completed:
+                    logger.info(f"Starting wheel for raffle {raffle_id}")
+                    await RaffleWheel.run_wheel(raffle_id, db)
+                    
+        except Exception as e:
+            logger.error(f"Error in wheel delay for raffle {raffle_id}: {e}")

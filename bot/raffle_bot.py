@@ -494,17 +494,39 @@ async def show_history(message: types.Message):
             
             # Показываем победителей
             if raffle.get('winners'):
-                for winner in raffle['winners'][:3]:
-                    history_text += f"🏆 {winner['position']} место: @{winner['user']['username'] or winner['user']['first_name']}\n"
-                if len(raffle['winners']) > 3:
-                    history_text += f"... и еще {len(raffle['winners']) - 3} победителей\n"
+                history_text += "🏆 **Победители:**\n"
+                for winner in sorted(raffle['winners'], key=lambda w: w['position']):
+                    username = winner['user']['username'] or f"{winner['user']['first_name']} {winner['user'].get('last_name', '')}".strip()
+                    history_text += f"  {winner['position']} место: @{username} - {winner['prize']}\n"
             
             history_text += "─" * 30 + "\n\n"
         
+        # Если текст слишком длинный, разбиваем на части
         if len(history_text) > 4000:
-            history_text = history_text[:4000] + "\n\n... (показаны последние розыгрыши)"
-        
-        await message.answer(history_text, parse_mode="Markdown")
+            # Отправляем по частям
+            parts = []
+            current_part = ""
+            lines = history_text.split('\n')
+            
+            for line in lines:
+                if len(current_part) + len(line) + 1 < 4000:
+                    current_part += line + '\n'
+                else:
+                    if current_part:
+                        parts.append(current_part)
+                    current_part = line + '\n'
+            
+            if current_part:
+                parts.append(current_part)
+            
+            for i, part in enumerate(parts):
+                if i == 0:
+                    await message.answer(part, parse_mode="Markdown")
+                else:
+                    await message.answer(part, parse_mode="Markdown")
+                await asyncio.sleep(0.1)
+        else:
+            await message.answer(history_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error showing history: {e}")
@@ -563,76 +585,63 @@ async def process_photo(message: types.Message, state: FSMContext):
     if message.photo:
         photo_file_id = message.photo[-1].file_id
         
-        # Загружаем фото на сервер
+        # Загружаем фото на сервер через API
         try:
-            # Получаем файл из Telegram
-            file_info = await bot.get_file(photo_file_id)
-            file_path = file_info.file_path
+            admin_data = {
+                "id": str(ADMIN_IDS[0]),
+                "first_name": "Admin",
+                "username": "admin",
+            }
             
-            # Скачиваем файл
-            async with aiohttp.ClientSession() as session:
-                file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-                async with session.get(file_url) as resp:
-                    file_data = await resp.read()
+            auth_date = int(time.time())
+            user_json = json.dumps(admin_data, separators=(",", ":"), ensure_ascii=False)
+            encoded_user = urllib.parse.quote(user_json)
             
-            # Загружаем на наш сервер
+            params = {
+                "auth_date": str(auth_date),
+                "user": user_json
+            }
+            
+            data_check_arr = []
+            for key in sorted(params.keys()):
+                data_check_arr.append(f"{key}={params[key]}")
+            data_check_string = "\n".join(data_check_arr)
+            
+            secret_key = hmac.new(
+                b"WebAppData",
+                BOT_TOKEN.encode(),
+                hashlib.sha256
+            ).digest()
+            
+            hash_value = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {init_data}",
+            }
+            
             async with aiohttp.ClientSession() as session:
-                # Формируем initData для авторизации
-                auth_date = int(time.time())
-                admin_data = {
-                    "id": str(ADMIN_IDS[0]),
-                    "first_name": "Admin",
-                    "username": "admin",
-                }
-                user_json = json.dumps(admin_data, separators=(",", ":"), ensure_ascii=False)
-                encoded_user = urllib.parse.quote(user_json)
-                
-                params = {
-                    "auth_date": str(auth_date),
-                    "user": user_json
-                }
-                
-                data_check_arr = []
-                for key in sorted(params.keys()):
-                    data_check_arr.append(f"{key}={params[key]}")
-                data_check_string = "\n".join(data_check_arr)
-                
-                secret_key = hmac.new(
-                    b"WebAppData",
-                    BOT_TOKEN.encode(),
-                    hashlib.sha256
-                ).digest()
-                
-                hash_value = hmac.new(
-                    secret_key,
-                    data_check_string.encode(),
-                    hashlib.sha256
-                ).hexdigest()
-                
-                init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
-                
-                # Загружаем файл
-                form_data = aiohttp.FormData()
-                form_data.add_field('file', file_data, filename='photo.jpg', content_type='image/jpeg')
-                
-                headers = {
-                    "Authorization": f"Bearer {init_data}",
-                }
-                
-                async with session.post(f"{API_URL}/api/admin/upload-image", data=form_data, headers=headers, ssl=False) as resp:
-                    if resp.status in (200, 201):
-                        result = await resp.json()
-                        photo_url = API_URL + result['url']
+                async with session.post(
+                    f"{API_URL}/api/admin/upload-telegram-photo",
+                    json={"file_id": photo_file_id},
+                    headers=headers,
+                    ssl=False
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        photo_url = f"{API_URL}{data['url']}"
                         await state.update_data(photo_file_id=photo_file_id, photo_url=photo_url)
-                        await message.answer("✅ Фото загружено успешно!")
                     else:
                         await state.update_data(photo_file_id=photo_file_id, photo_url='')
-                        await message.answer("⚠️ Не удалось загрузить фото на сервер, но розыгрыш можно продолжить")
-                        
         except Exception as e:
             logger.error(f"Error uploading photo: {e}")
             await state.update_data(photo_file_id=photo_file_id, photo_url='')
-            await message.answer("⚠️ Ошибка при загрузке фото, но розыгрыш можно продолжить")
             
     elif message.text and message.text.lower() == 'пропустить':
         await state.update_data(photo_file_id=None, photo_url='')

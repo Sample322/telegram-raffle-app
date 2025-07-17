@@ -5,6 +5,7 @@ from typing import List
 import os
 import uuid
 from datetime import datetime
+import aiohttp
 
 from ..database import get_db
 from ..models import Raffle, User, Admin
@@ -16,6 +17,8 @@ router = APIRouter()
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 @router.post("/raffles", response_model=RaffleSchema)
 async def create_raffle(
@@ -67,6 +70,46 @@ async def upload_image(
     
     # Return URL
     return {"url": f"/uploads/{file_name}"}
+
+@router.post("/upload-telegram-photo")
+async def upload_telegram_photo(
+    file_id: str,
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """Download photo from Telegram and save it"""
+    try:
+        # Get file info from Telegram
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={"file_id": file_id}) as response:
+                data = await response.json()
+                
+                if not data.get("ok"):
+                    raise HTTPException(status_code=400, detail="Failed to get file info")
+                
+                file_path = data["result"]["file_path"]
+                
+        # Download file
+        download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=400, detail="Failed to download file")
+                
+                content = await response.read()
+                
+                # Save file
+                file_ext = file_path.split(".")[-1]
+                file_name = f"{uuid.uuid4()}.{file_ext}"
+                local_file_path = os.path.join(UPLOAD_DIR, file_name)
+                
+                with open(local_file_path, "wb") as f:
+                    f.write(content)
+                
+                return {"url": f"/uploads/{file_name}"}
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.patch("/raffles/{raffle_id}/end")
 async def end_raffle_manually(
