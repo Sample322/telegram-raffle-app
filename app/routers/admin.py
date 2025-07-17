@@ -27,7 +27,22 @@ async def create_raffle(
     db: AsyncSession = Depends(get_db)
 ):
     """Create new raffle"""
-    raffle = Raffle(**raffle_data.dict())
+    from ..config import parse_moscow_time, convert_to_utc
+    
+    # Конвертируем дату из московского времени в UTC для хранения
+    raffle_dict = raffle_data.dict()
+    
+    # Парсим дату как московское время и конвертируем в UTC
+    end_date_str = raffle_dict['end_date']
+    if isinstance(end_date_str, str):
+        moscow_time = parse_moscow_time(end_date_str)
+    else:
+        moscow_time = end_date_str
+    
+    utc_time = convert_to_utc(moscow_time)
+    raffle_dict['end_date'] = utc_time
+    
+    raffle = Raffle(**raffle_dict)
     db.add(raffle)
     await db.commit()
     await db.refresh(raffle)
@@ -39,11 +54,15 @@ async def create_raffle(
     users = users_result.scalars().all()
     user_ids = [user.telegram_id for user in users]
     
+    # For notifications, format the date back to Moscow time
+    notification_data = raffle_data.dict()
+    notification_data['end_date'] = moscow_time.strftime('%d.%m.%Y в %H:%M МСК')
+    
     # Send notifications
     await TelegramService.notify_new_raffle(
         raffle.id,
         user_ids,
-        raffle_data.dict()
+        notification_data
     )
     
     return raffle

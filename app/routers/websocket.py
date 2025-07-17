@@ -62,7 +62,8 @@ class RaffleWheel:
             await asyncio.sleep(3)  # Pause before starting
             
             # Start from last place to first
-            for position in sorted(raffle.prizes.keys(), reverse=True):
+            sorted_positions = sorted(raffle.prizes.keys(), key=lambda x: int(x), reverse=True)
+            for position in sorted_positions:
                 if not remaining_participants:
                     break
                 
