@@ -17,7 +17,7 @@ function LiveRafflePage() {
   const [countdown, setCountdown] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
-
+  const [predeterminedWinnerIndex, setPredeterminedWinnerIndex] = useState(null);
   useEffect(() => {
     loadRaffleData();
     connectWebSocket();
@@ -93,10 +93,11 @@ function LiveRafflePage() {
           
         case 'wheel_start':
           setCurrentRound({
-            position: data.position,
-            prize: data.prize,
-            participants: data.participants
+          position: data.position,
+          prize: data.prize,
+          participants: data.participants
           });
+          setPredeterminedWinnerIndex(data.winner_index); // НОВОЕ: сохраняем индекс победителя
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
           break;
@@ -252,6 +253,7 @@ function LiveRafflePage() {
                   participants={wheelParticipants}
                   isSpinning={isSpinning}
                   currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                  predeterminedWinnerIndex={predeterminedWinnerIndex}
                   onComplete={(winner) => console.log('Winner selected:', winner)}
                 />
               ) : (
