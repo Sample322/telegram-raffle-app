@@ -1,14 +1,21 @@
 import aiohttp
 import hashlib
 import hmac
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
 import json
+import asyncio
+from functools import lru_cache
+import time
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-app.onrender.com")
+
+# Кеш для результатов проверки подписки
+subscription_cache: Dict[str, Dict] = {}
+CACHE_TTL = 60  # 60 секунд
 
 class TelegramService:
     @staticmethod
@@ -64,24 +71,57 @@ class TelegramService:
             return None
     
     @staticmethod
-    async def check_channel_subscription(user_id: int, channel_username: str) -> bool:
-        """Check if user is subscribed to channel"""
+    async def check_channel_subscription(user_id: int, channel_username: str, retry_count: int = 3) -> bool:
+        """Check if user is subscribed to channel with caching and retries"""
         channel = channel_username.replace('@', '')
+        cache_key = f"{user_id}:{channel}"
+        
+        # Проверяем кеш
+        if cache_key in subscription_cache:
+            cached_data = subscription_cache[cache_key]
+            if time.time() - cached_data['timestamp'] < CACHE_TTL:
+                return cached_data['is_subscribed']
+        
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
         
         async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(url, json={
-                    "chat_id": f"@{channel}",
-                    "user_id": user_id
-                }) as response:
-                    data = await response.json()
-                    if data.get("ok"):
-                        status = data["result"]["status"]
-                        return status in ["creator", "administrator", "member"]
-                    return False
-            except:
-                return False
+            for attempt in range(retry_count):
+                try:
+                    async with session.post(url, json={
+                        "chat_id": f"@{channel}",
+                        "user_id": user_id
+                    }, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        data = await response.json()
+                        
+                        if data.get("ok"):
+                            status = data["result"]["status"]
+                            is_subscribed = status in ["creator", "administrator", "member"]
+                            
+                            # Сохраняем в кеш
+                            subscription_cache[cache_key] = {
+                                'is_subscribed': is_subscribed,
+                                'timestamp': time.time()
+                            }
+                            
+                            return is_subscribed
+                        
+                        # Если ошибка от API Telegram
+                        error_code = data.get("error_code")
+                        if error_code == 400:  # Bad Request - канал не существует или бот не админ
+                            print(f"Bot is not admin in channel @{channel} or channel doesn't exist")
+                            return False
+                        
+                except asyncio.TimeoutError:
+                    print(f"Timeout checking subscription for user {user_id} in @{channel}, attempt {attempt + 1}/{retry_count}")
+                except Exception as e:
+                    print(f"Error checking subscription: {e}, attempt {attempt + 1}/{retry_count}")
+                
+                # Ждем перед следующей попыткой
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(1)
+            
+            # Если все попытки неудачны, считаем что не подписан
+            return False
     
     @staticmethod
     async def send_notification(user_id: int, text: str, photo: Optional[str] = None, 
@@ -139,6 +179,7 @@ class TelegramService:
                 raffle_data.get('photo_url'),
                 keyboard
             )
+            await asyncio.sleep(0.05)  # Rate limiting
     
     @staticmethod
     async def notify_new_raffle(raffle_id: int, users: List[int], raffle_data: dict):
@@ -168,3 +209,36 @@ class TelegramService:
                 raffle_data.get('photo_url'),
                 keyboard
             )
+            await asyncio.sleep(0.05)  # Rate limiting
+    
+    @staticmethod
+    async def notify_raffle_complete(raffle_id: int, users: List[int], raffle_data: dict, winners: List[dict]):
+        """Notify users about raffle completion"""
+        keyboard = {
+            "inline_keyboard": [[{
+                "text": "📊 Посмотреть результаты",
+                "web_app": {"url": f"{WEBAPP_URL}/raffle/{raffle_id}/live"}
+            }]]
+        }
+        
+        # Format winners
+        winners_text = "\n".join([
+            f"{w['position']}. @{w['user']['username'] or w['user']['first_name']} - {w['prize']}"
+            for w in sorted(winners, key=lambda x: x['position'])
+        ])
+        
+        text = (
+            f"🎊 **Розыгрыш завершен!**\n\n"
+            f"**{raffle_data['title']}**\n\n"
+            f"🏆 **Победители:**\n{winners_text}\n\n"
+            f"Поздравляем победителей! 🎉"
+        )
+        
+        for user_id in users:
+            await TelegramService.send_notification(
+                user_id,
+                text,
+                raffle_data.get('photo_url'),
+                keyboard
+            )
+            await asyncio.sleep(0.05)  # Rate limiting

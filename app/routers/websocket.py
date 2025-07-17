@@ -1,5 +1,3 @@
-# backend/app/routers/websocket.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,140 +6,182 @@ import random
 import json
 from typing import List, Dict
 from datetime import datetime
+import logging
 
 from ..database import get_db, async_session_maker
 from ..models import Raffle, Participant, User, Winner
 from ..websocket_manager import manager
 from ..services.telegram import TelegramService
+from ..services.notifications import NotificationService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class RaffleWheel:
     @staticmethod
     async def run_wheel(raffle_id: int, db: AsyncSession):
         """Run the raffle wheel animation"""
-        # Get raffle and participants
-        raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
-        raffle = raffle_result.scalar_one_or_none()
-        
-        if not raffle or raffle.is_completed:
-            return
-        
-        # Get all participants
-        participants_result = await db.execute(
-            select(User).join(Participant).where(Participant.raffle_id == raffle_id)
-        )
-        participants = participants_result.scalars().all()
-        
-        if len(participants) < len(raffle.prizes):
-            await manager.broadcast({
-                "type": "error",
-                "message": "Not enough participants"
-            }, raffle_id)
-            return
-        
-        # Send initial countdown
-        for i in range(300, 0, -1):  # 5 minutes countdown
-            await manager.broadcast({
-                "type": "countdown",
-                "seconds": i
-            }, raffle_id)
-            await asyncio.sleep(1)
-        
-        # Start the wheel
-        await manager.broadcast({
-            "type": "wheel_starting",
-            "message": "Розыгрыш начинается!"
-        }, raffle_id)
-        
-        await asyncio.sleep(3)  # Dramatic pause
-        
-        # Shuffle participants
-        participants_list = list(participants)
-        random.shuffle(participants_list)
-        
-        winners = []
-        remaining_participants = participants_list.copy()
-        
-        # Start from last place to first
-        for position in sorted(raffle.prizes.keys(), reverse=True):
-            if not remaining_participants:
-                break
+        try:
+            # Get raffle and participants
+            raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
+            raffle = raffle_result.scalar_one_or_none()
             
-            position_int = int(position)
+            if not raffle or raffle.is_completed:
+                logger.warning(f"Raffle {raffle_id} not found or already completed")
+                return
             
-            # Send wheel data
+            # Get all participants
+            participants_result = await db.execute(
+                select(User).join(Participant).where(Participant.raffle_id == raffle_id)
+            )
+            participants = participants_result.scalars().all()
+            
+            if len(participants) < len(raffle.prizes):
+                await manager.broadcast({
+                    "type": "error",
+                    "message": "Недостаточно участников для проведения розыгрыша"
+                }, raffle_id)
+                return
+            
+            logger.info(f"Starting raffle {raffle_id} with {len(participants)} participants")
+            
+            # Shuffle participants
+            participants_list = list(participants)
+            random.shuffle(participants_list)
+            
+            winners = []
+            remaining_participants = participants_list.copy()
+            
+            # Announce start
             await manager.broadcast({
-                "type": "wheel_start",
-                "position": position_int,
-                "prize": raffle.prizes[position],
-                "participants": [
-                    {
-                        "id": p.telegram_id, 
-                        "username": p.username,
+                "type": "raffle_starting",
+                "total_participants": len(participants),
+                "total_prizes": len(raffle.prizes)
+            }, raffle_id)
+            
+            await asyncio.sleep(3)  # Pause before starting
+            
+            # Start from last place to first
+            for position in sorted(raffle.prizes.keys(), reverse=True):
+                if not remaining_participants:
+                    break
+                
+                # Prepare participant data for wheel
+                wheel_participants = []
+                for p in remaining_participants:
+                    wheel_participants.append({
+                        "id": p.telegram_id,
+                        "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
                         "first_name": p.first_name,
                         "last_name": p.last_name
-                    } 
-                    for p in remaining_participants
-                ]
-            }, raffle_id)
+                    })
+                
+                # Send wheel data
+                await manager.broadcast({
+                    "type": "wheel_start",
+                    "position": int(position),
+                    "prize": raffle.prizes[position],
+                    "participants": wheel_participants
+                }, raffle_id)
+                
+                logger.info(f"Starting wheel for position {position}")
+                
+                # Wait for wheel animation (7 seconds)
+                await asyncio.sleep(7)
+                
+                # Select winner
+                winner = random.choice(remaining_participants)
+                remaining_participants.remove(winner)
+                
+                # Save winner to database
+                winner_record = Winner(
+                    raffle_id=raffle_id,
+                    user_id=winner.id,
+                    position=int(position),
+                    prize=raffle.prizes[position]
+                )
+                db.add(winner_record)
+                await db.commit()
+                
+                winner_data = {
+                    "position": int(position),
+                    "user": {
+                        "id": winner.telegram_id,
+                        "username": winner.username,
+                        "first_name": winner.first_name,
+                        "last_name": winner.last_name
+                    },
+                    "prize": raffle.prizes[position]
+                }
+                winners.append(winner_data)
+                
+                # Send winner result
+                await manager.broadcast({
+                    "type": "winner_selected",
+                    "position": int(position),
+                    "winner": {
+                        "id": winner.telegram_id,
+                        "username": winner.username or f"{winner.first_name} {winner.last_name or ''}".strip(),
+                        "first_name": winner.first_name,
+                        "last_name": winner.last_name
+                    },
+                    "prize": raffle.prizes[position]
+                }, raffle_id)
+                
+                logger.info(f"Winner for position {position}: {winner.username or winner.first_name}")
+                
+                # Pause between rounds
+                if position != "1":  # Don't pause after last winner
+                    await asyncio.sleep(3)
             
-            # Wait for wheel animation (7 seconds)
-            await asyncio.sleep(7)
-            
-            # Select winner
-            winner = random.choice(remaining_participants)
-            remaining_participants.remove(winner)
-            
-            # Save winner to database
-            winner_record = Winner(
-                raffle_id=raffle_id,
-                user_id=winner.id,
-                position=position_int,
-                prize=raffle.prizes[position]
-            )
-            db.add(winner_record)
+            # Mark raffle as completed
+            raffle.is_completed = True
+            raffle.is_active = False
             await db.commit()
             
-            winners.append({
-                "position": position_int,
-                "user": {
-                    "id": winner.telegram_id,
-                    "username": winner.username,
-                    "first_name": winner.first_name,
-                    "last_name": winner.last_name
-                },
-                "prize": raffle.prizes[position]
-            })
-            
-            # Send winner result
+            # Send final results
             await manager.broadcast({
-                "type": "winner_selected",
-                "position": position_int,
-                "winner": {
-                    "id": winner.telegram_id,
-                    "username": winner.username,
-                    "first_name": winner.first_name,
-                    "last_name": winner.last_name
-                },
-                "prize": raffle.prizes[position]
+                "type": "raffle_complete",
+                "winners": winners
             }, raffle_id)
             
-            await asyncio.sleep(3)  # Pause between rounds
-        
-        # Mark raffle as completed
-        raffle.is_completed = True
-        raffle.is_active = False
-        await db.commit()
-        
-        # Send final results
-        await manager.broadcast({
-            "type": "raffle_complete",
-            "winners": winners
-        }, raffle_id)
-        
-        # Send notifications to winners
-        await TelegramService.notify_winners(raffle_id, winners)
+            logger.info(f"Raffle {raffle_id} completed successfully")
+            
+            # Send notifications about completion
+            await NotificationService.notify_winners(raffle_id, winners)
+            
+            # Get all users to notify
+            users_result = await db.execute(
+                select(User).where(User.notifications_enabled == True)
+            )
+            users = users_result.scalars().all()
+            
+            # Also get participants
+            participants_result = await db.execute(
+                select(User).join(Participant).where(Participant.raffle_id == raffle_id)
+            )
+            participants = participants_result.scalars().all()
+            
+            # Combine and deduplicate user IDs
+            all_user_ids = list(set([u.telegram_id for u in users] + [p.telegram_id for p in participants]))
+            
+            # Send completion notifications
+            await TelegramService.notify_raffle_complete(
+                raffle_id,
+                all_user_ids,
+                {
+                    "title": raffle.title,
+                    "photo_url": raffle.photo_url
+                },
+                winners
+            )
+            
+        except Exception as e:
+            logger.error(f"Error running wheel for raffle {raffle_id}: {e}")
+            await manager.broadcast({
+                "type": "error",
+                "message": "Произошла ошибка при проведении розыгрыша"
+            }, raffle_id)
 
 @router.websocket("/{raffle_id}")
 async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
@@ -149,22 +189,29 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
     await manager.connect(websocket, raffle_id)
     
     try:
-        # Check if wheel should be started automatically
+        # Send current state to new connection
         async with async_session_maker() as db:
             raffle_result = await db.execute(
                 select(Raffle).where(Raffle.id == raffle_id)
             )
             raffle = raffle_result.scalar_one_or_none()
             
-            if raffle and raffle.draw_started and not raffle.is_completed:
-                # Start wheel automatically if draw has started
-                asyncio.create_task(RaffleWheel.run_wheel(raffle_id, db))
+            if raffle:
+                await websocket.send_json({
+                    "type": "connection_established",
+                    "raffle": {
+                        "id": raffle.id,
+                        "title": raffle.title,
+                        "is_completed": raffle.is_completed,
+                        "draw_started": raffle.draw_started
+                    }
+                })
         
         while True:
             # Keep connection alive
             data = await websocket.receive_text()
             
-            # Handle messages if needed
+            # Handle admin commands if needed
             try:
                 message = json.loads(data)
                 if message.get("type") == "ping":

@@ -96,13 +96,13 @@ class NotificationService:
                 )
                 
                 await TelegramService.send_notification(
-                    winner['user_id'],
+                    winner['user']['id'],
                     text
                 )
                 
                 await asyncio.sleep(0.1)  # Rate limiting
             except Exception as e:
-                logger.error(f"Error notifying winner {winner['user_id']}: {e}")
+                logger.error(f"Error notifying winner {winner['user']['id']}: {e}")
     
     @staticmethod
     async def notify_channel_check_reminder(raffle_id: int):

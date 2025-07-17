@@ -15,10 +15,13 @@ router = APIRouter()
 @router.get("/active", response_model=List[RaffleSchema])
 async def get_active_raffles(db: AsyncSession = Depends(get_db)):
     """Get all active raffles - PUBLIC ENDPOINT"""
+    current_time = datetime.now(timezone.utc)
+    
     result = await db.execute(
         select(Raffle).where(
             Raffle.is_active == True,
-            Raffle.is_completed == False
+            Raffle.is_completed == False,
+            Raffle.end_date > current_time  # Only show raffles that haven't ended
         ).order_by(Raffle.created_at.desc())
     )
     raffles = result.scalars().all()
