@@ -1,12 +1,11 @@
-// frontend/src/components/WheelComponent.js - ИСПРАВЛЕННЫЙ ФАЙЛ
+import React, { useEffect, useRef, useState } from 'react';
 
-import React, { useEffect, useRef } from 'react';
-
-const WheelComponent = ({ participants, isSpinning, onComplete }) => {
+const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
   const velocityRef = useRef(0);
   const animationRef = useRef(null);
+  const [currentParticipant, setCurrentParticipant] = useState(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -26,6 +25,17 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
       startSpin();
     }
   }, [isSpinning, participants]);
+
+  const getCurrentSegment = () => {
+    if (participants.length === 0) return null;
+    
+    const normalizedAngle = angleRef.current % (2 * Math.PI);
+    const adjustedAngle = (2 * Math.PI - normalizedAngle + Math.PI / 2) % (2 * Math.PI);
+    const segmentAngle = (2 * Math.PI) / participants.length;
+    const currentIndex = Math.floor(adjustedAngle / segmentAngle) % participants.length;
+    
+    return participants[currentIndex];
+  };
 
   const drawWheel = () => {
     const canvas = canvasRef.current;
@@ -67,8 +77,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
       ctx.arc(centerX, centerY, radius, startAngle, endAngle);
       ctx.closePath();
       
-      // Alternate colors
-      const colors = ['#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444'];
+      // Alternate colors with more vibrant palette
+      const colors = ['#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6', '#6366F1'];
       ctx.fillStyle = colors[index % colors.length];
       ctx.fill();
       
@@ -120,46 +130,77 @@ const WheelComponent = ({ participants, isSpinning, onComplete }) => {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    // Update current participant
+    const current = getCurrentSegment();
+    if (current && (!currentParticipant || current.id !== currentParticipant.id)) {
+      setCurrentParticipant(current);
+    }
   };
 
   const startSpin = () => {
     if (participants.length === 0) return;
     
-    velocityRef.current = 20 + Math.random() * 10; // Random initial velocity
+    // Random velocity between 25-35 for 7 seconds spin
+    velocityRef.current = 25 + Math.random() * 10;
     animate();
   };
 
   const animate = () => {
+    // Calculate rotation with easing
+    const deceleration = 0.985; // Slower deceleration for ~7 seconds
     angleRef.current += velocityRef.current * 0.01;
-    velocityRef.current *= 0.985; // Deceleration
+    velocityRef.current *= deceleration;
 
     drawWheel();
 
-    if (velocityRef.current > 0.1) {
+    if (velocityRef.current > 0.05) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
       // Animation complete
-      const normalizedAngle = angleRef.current % (2 * Math.PI);
-      const adjustedAngle = (2 * Math.PI - normalizedAngle + Math.PI / 2) % (2 * Math.PI);
-      const segmentAngle = (2 * Math.PI) / participants.length;
-      const selectedIndex = Math.floor(adjustedAngle / segmentAngle) % participants.length;
-      
-      if (onComplete && participants[selectedIndex]) {
-        onComplete(participants[selectedIndex]);
+      const winner = getCurrentSegment();
+      if (onComplete && winner) {
+        onComplete(winner);
       }
     }
   };
 
   return (
     <div className="relative flex flex-col items-center">
+      {/* Current participant display */}
+      {currentParticipant && participants.length > 0 && (
+        <div className="mb-4 text-center">
+          <p className="text-sm text-gray-600 mb-1">Сейчас под стрелкой:</p>
+          <div className="bg-white rounded-lg shadow-lg px-6 py-3">
+            <p className="text-xl font-bold text-gray-800">
+              {currentParticipant.username || 
+               `${currentParticipant.first_name || ''} ${currentParticipant.last_name || ''}`.trim()}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Prize display */}
+      {currentPrize && (
+        <div className="mb-4 text-center">
+          <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg shadow-lg px-6 py-3">
+            <p className="text-sm opacity-90">Разыгрывается:</p>
+            <p className="text-xl font-bold">{currentPrize.position} место - {currentPrize.prize}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Wheel canvas */}
       <canvas 
         ref={canvasRef} 
         className="mx-auto" 
         style={{ maxWidth: '100%', height: 'auto' }}
       />
+      
+      {/* Status display */}
       <div className="mt-4 text-center">
         <p className="text-sm font-semibold text-gray-600">
-          {isSpinning ? 'Колесо вращается...' : 'Ожидание розыгрыша...'}
+          {isSpinning ? '🎰 Колесо вращается...' : '⏳ Ожидание розыгрыша...'}
         </p>
         {participants.length > 0 && (
           <p className="text-xs text-gray-500 mt-1">
