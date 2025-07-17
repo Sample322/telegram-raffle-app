@@ -62,14 +62,20 @@ class RaffleWheel:
             await asyncio.sleep(3)  # Pause before starting
             
             # Start from last place to first
+            # Start from last place to first
             sorted_positions = sorted(raffle.prizes.keys(), key=lambda x: int(x), reverse=True)
             for position in sorted_positions:
                 if not remaining_participants:
                     break
                 
+                # ВАЖНО: Выбираем победителя ЗАРАНЕЕ на бэкенде
+                winner = random.choice(remaining_participants)
+                winner_index = participants_list.index(winner)  # Индекс победителя в исходном списке
+                remaining_participants.remove(winner)
+                
                 # Prepare participant data for wheel
                 wheel_participants = []
-                for p in remaining_participants:
+                for p in participants_list:  # Используем полный список, не remaining
                     wheel_participants.append({
                         "id": p.telegram_id,
                         "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
@@ -77,22 +83,19 @@ class RaffleWheel:
                         "last_name": p.last_name
                     })
                 
-                # Send wheel data
+                # Send wheel data с информацией о победителе
                 await manager.broadcast({
                     "type": "wheel_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
-                    "participants": wheel_participants
+                    "participants": wheel_participants,
+                    "winner_index": winner_index  # НОВОЕ: передаем индекс победителя
                 }, raffle_id)
                 
-                logger.info(f"Starting wheel for position {position}")
+                logger.info(f"Starting wheel for position {position}, predetermined winner index: {winner_index}")
                 
                 # Wait for wheel animation (7 seconds)
                 await asyncio.sleep(7)
-                
-                # Select winner
-                winner = random.choice(remaining_participants)
-                remaining_participants.remove(winner)
                 
                 # Save winner to database
                 winner_record = Winner(
