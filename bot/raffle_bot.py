@@ -14,7 +14,8 @@ import time
 import hashlib
 import hmac
 import urllib.parse
-
+from aiogram import types, F
+from aiogram.fsm.context import FSMContext
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -364,6 +365,27 @@ async def cmd_start(message: types.Message):
         "Используйте кнопки меню для навигации:",
         reply_markup=keyboard
     )
+# ───────────────────────────────────────────────
+# Админ‑кнопка «Создать розыгрыш»
+# ───────────────────────────────────────────────
+@dp.message(
+    F.text == "➕ Создать розыгрыш",          # текст ровно как на кнопке
+    F.from_user.id.in_(ADMIN_IDS)            # фильтр: только админы
+)
+async def create_raffle_start(message: types.Message, state: FSMContext):
+    """Первый шаг мастера создания розыгрыша"""
+    await state.clear()                                # сбросим старое FSM‑состояние
+    await state.set_state(RaffleStates.waiting_title)  # переходим к шагу 1
+    await message.answer(
+        "Шаг 1/6: Введите **название** розыгрыша:",
+        reply_markup=types.ReplyKeyboardRemove(),      # временно убираем меню
+        parse_mode="Markdown"
+    )
+
+# Если вдруг не‑админ пришлёт тот же текст вручную
+@dp.message(F.text == "➕ Создать розыгрыш")
+async def create_raffle_not_allowed(message: types.Message):
+    await message.answer("⛔️ Недостаточно прав для этой команды.")
 
 @dp.message(F.text == "📢 Получать уведомления")
 async def manage_notifications(message: types.Message):
