@@ -272,7 +272,9 @@ function LiveRafflePage() {
           <div className="bg-white/10 backdrop-blur rounded-lg p-6">
             <h2 className="text-2xl font-semibold mb-4">🏆 Призовые места</h2>
             <div className="space-y-3">
-              {Object.entries(raffle.prizes).map(([position, prize]) => {
+              {Object.entries(raffle.prizes)
+                .sort(([a], [b]) => parseInt(a) - parseInt(b)) // Сортируем по возрастанию (1, 2, 3...)
+                .map(([position, prize]) => {
                 const winner = winners.find(w => w.position === parseInt(position));
                 const isCurrentRound = currentRound?.position === parseInt(position);
                 

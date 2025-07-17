@@ -6,6 +6,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
   const velocityRef = useRef(0);
   const animationRef = useRef(null);
   const [currentParticipant, setCurrentParticipant] = useState(null);
+  const selectedWinnerRef = useRef(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -18,6 +19,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
     canvas.height = 500;
     
     drawWheel();
+    // Set initial participant
+    updateCurrentParticipant();
   }, [participants]);
 
   useEffect(() => {
@@ -26,15 +29,34 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
     }
   }, [isSpinning, participants]);
 
-  const getCurrentSegment = () => {
-    if (participants.length === 0) return null;
+  const getCurrentSegmentIndex = () => {
+    if (participants.length === 0) return -1;
     
-    const normalizedAngle = angleRef.current % (2 * Math.PI);
-    const adjustedAngle = (2 * Math.PI - normalizedAngle + Math.PI / 2) % (2 * Math.PI);
+    // Normalize angle to [0, 2π]
+    const normalizedAngle = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    
+    // The pointer is at the top (π/2), so we need to calculate which segment is there
+    // We need to add π/2 to the angle because the pointer is at the top
+    const pointerAngle = (normalizedAngle + Math.PI / 2) % (2 * Math.PI);
+    
+    // Calculate segment size
     const segmentAngle = (2 * Math.PI) / participants.length;
-    const currentIndex = Math.floor(adjustedAngle / segmentAngle) % participants.length;
     
-    return participants[currentIndex];
+    // Find which segment is under the pointer
+    // We need to reverse the calculation because wheel rotates counter-clockwise
+    const segmentIndex = Math.floor(pointerAngle / segmentAngle);
+    
+    return segmentIndex % participants.length;
+  };
+
+  const updateCurrentParticipant = () => {
+    const index = getCurrentSegmentIndex();
+    if (index >= 0 && index < participants.length) {
+      const participant = participants[index];
+      if (!currentParticipant || participant.id !== currentParticipant.id) {
+        setCurrentParticipant(participant);
+      }
+    }
   };
 
   const drawWheel = () => {
@@ -131,18 +153,18 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Update current participant
-    const current = getCurrentSegment();
-    if (current && (!currentParticipant || current.id !== currentParticipant.id)) {
-      setCurrentParticipant(current);
-    }
+    // Update current participant display
+    updateCurrentParticipant();
   };
 
   const startSpin = () => {
     if (participants.length === 0) return;
     
-    // Random velocity between 25-35 for 7 seconds spin
-    velocityRef.current = 25 + Math.random() * 10;
+    // Reset selected winner
+    selectedWinnerRef.current = null;
+    
+    // Random velocity between 20-30 for 7 seconds spin
+    velocityRef.current = 20 + Math.random() * 10;
     animate();
   };
 
@@ -157,10 +179,14 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize }) 
     if (velocityRef.current > 0.05) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
-      // Animation complete
-      const winner = getCurrentSegment();
-      if (onComplete && winner) {
-        onComplete(winner);
+      // Animation complete - determine final winner
+      const winnerIndex = getCurrentSegmentIndex();
+      if (winnerIndex >= 0 && winnerIndex < participants.length) {
+        const winner = participants[winnerIndex];
+        selectedWinnerRef.current = winner;
+        if (onComplete) {
+          onComplete(winner);
+        }
       }
     }
   };

@@ -1,16 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { TrophyIcon, CalendarIcon, UsersIcon } from '@heroicons/react/24/outline';
-
+import { formatToMoscowTime } from '../utils/dateUtils';
 const CompletedRaffleCard = ({ raffle }) => {
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-  };
+  return formatToMoscowTime(dateString);
+};
 
   const getWinnerDisplay = (winner, position) => {
     const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };

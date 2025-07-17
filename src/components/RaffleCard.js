@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import Countdown from 'react-countdown';
 import { CheckCircleIcon } from '@heroicons/react/24/solid';
 import api from '../services/api';
+import { formatToMoscowTime } from '../utils/dateUtils';
 
 const RaffleCard = ({ raffle }) => {
   const [isParticipating, setIsParticipating] = useState(false);
@@ -85,7 +86,7 @@ const RaffleCard = ({ raffle }) => {
 
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-sm text-gray-600">До окончания:</p>
+            <p className="text-xs text-gray-500">До: {formatToMoscowTime(raffle.end_date)}</p>
             <Countdown 
               date={new Date(raffle.end_date)} 
               renderer={CountdownRenderer}
