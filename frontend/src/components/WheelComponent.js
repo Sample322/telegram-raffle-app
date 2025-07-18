@@ -8,13 +8,6 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
   const [currentParticipant, setCurrentParticipant] = useState(null);
   const selectedWinnerRef = useRef(null);
   const targetWinnerIndexRef = useRef(null);
-  
-  // Добавляем недостающие refs
-  const animationStartTimeRef = useRef(0);
-  const initialAngleRef = useRef(0);
-  const participantsRef = useRef(null);
-  const transitionProgressRef = useRef(1);
-
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -25,53 +18,46 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
     canvas.width = 500;
     canvas.height = 500;
     
-    // Анимация перехода при изменении количества участников
-    if (participants.length > 0 && participants.length !== participantsRef.current?.length) {
-      transitionProgressRef.current = 0;
-      const animateTransition = () => {
-        transitionProgressRef.current += 0.05;
-        if (transitionProgressRef.current < 1) {
-          drawWheel();
-          requestAnimationFrame(animateTransition);
-        } else {
-          transitionProgressRef.current = 1;
-          drawWheel();
-        }
-      };
-      animateTransition();
-    } else {
-      drawWheel();
-    }
-    
-    participantsRef.current = participants;
+    drawWheel();
+    // Set initial participant
     updateCurrentParticipant();
   }, [participants]);
 
   useEffect(() => {
-    if (isSpinning && participants.length > 0) {
-      targetWinnerIndexRef.current = predeterminedWinnerIndex;
-      startSpin();
+  if (isSpinning && participants.length > 0) {
+    targetWinnerIndexRef.current = predeterminedWinnerIndex;
+    startSpin();
+  }
+}, [isSpinning, participants, predeterminedWinnerIndex]);
+
+ /**
+ * Какой сектор сейчас под красной стрелкой
+ * (стрелка смотрит на угол 3π/2 = 270°).
+ */
+const getCurrentSegmentIndex = () => {
+  if (participants.length === 0) return -1;
+
+  // угол колеса в диапазоне [0‥2π)
+  const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+  // «угол, куда смотрит стрелка»  =  3π/2  −  угол колеса
+  const pointerAngle = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
+
+  const segmentAngle = (2 * Math.PI) / participants.length;
+  return Math.floor(pointerAngle / segmentAngle);
+};
+
+
+ const updateCurrentParticipant = () => {
+  const index = getCurrentSegmentIndex();
+  if (index >= 0 && index < participants.length) {
+    const participant = participants[index];
+    if (!currentParticipant || participant.id !== currentParticipant.id) {
+      console.log('Current participant:', participant.username || participant.first_name, 'Index:', index); // Для отладки
+      setCurrentParticipant(participant);
     }
-  }, [isSpinning, participants, predeterminedWinnerIndex]);
-
-  const getCurrentSegmentIndex = () => {
-    if (participants.length === 0) return -1;
-
-    const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-    const pointerAngle = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    return Math.floor(pointerAngle / segmentAngle);
-  };
-
-  const updateCurrentParticipant = () => {
-    const index = getCurrentSegmentIndex();
-    if (index >= 0 && index < participants.length) {
-      const participant = participants[index];
-      if (!currentParticipant || participant.id !== currentParticipant.id) {
-        setCurrentParticipant(participant);
-      }
-    }
-  };
+  }
+};
 
   const drawWheel = () => {
     const canvas = canvasRef.current;
@@ -167,90 +153,91 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
     ctx.lineWidth = 2;
     ctx.stroke();
 
+    // Update current participant display
     updateCurrentParticipant();
   };
 
   const startSpin = () => {
-    if (participants.length === 0) return;
+  if (participants.length === 0) return;
+  
+  // Reset selected winner
+  selectedWinnerRef.current = null;
+  
+  // Если есть предопределенный победитель, вычисляем нужный угол
+  if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
+    const segmentAngle = (2 * Math.PI) / participants.length;
     
-    selectedWinnerRef.current = null;
-    animationStartTimeRef.current = Date.now();
-    initialAngleRef.current = angleRef.current;
+    // Целевой угол для остановки на нужном участнике
+    const targetSegmentCenter = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
     
-    if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
-      const segmentAngle = (2 * Math.PI) / participants.length;
-      const targetSegmentCenter = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
-      
-      const fullRotations = 5 + Math.random() * 3;
-      const totalRotation = fullRotations * 2 * Math.PI + (3 * Math.PI / 2 - targetSegmentCenter);
-      
-      velocityRef.current = totalRotation;
-    } else {
-      velocityRef.current = (20 + Math.random() * 10) * 2 * Math.PI;
-    }
+    // Вычисляем, сколько нужно повернуть колесо
+    // Добавляем несколько полных оборотов для эффекта
+    const fullRotations = 5 + Math.random() * 3; // 5-8 полных оборотов
+    const totalRotation = fullRotations * 2 * Math.PI + (3 * Math.PI / 2 - targetSegmentCenter);
     
-    animate();
-  };
+    // Устанавливаем начальную скорость для достижения нужного угла за ~7 секунд
+    velocityRef.current = totalRotation / 7 * 100; // Подгоняем скорость
+  } else {
+    // Fallback на случайную скорость, если победитель не задан
+    velocityRef.current = 20 + Math.random() * 10;
+  }
+  
+  animate();
+};
 
   const animate = () => {
-    const currentTime = Date.now();
-    const elapsed = currentTime - animationStartTimeRef.current;
+  if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
+    // Анимация с предопределенным победителем
+    const segmentAngle = (2 * Math.PI) / participants.length;
+    const targetAngle = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
+    const targetFinalAngle = 3 * Math.PI / 2 - targetAngle;
     
-    if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
-      const segmentAngle = (2 * Math.PI) / participants.length;
-      const targetAngle = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
-      const targetFinalAngle = 3 * Math.PI / 2 - targetAngle;
+    // Плавное замедление
+    const deceleration = 0.97;
+    angleRef.current += velocityRef.current * 0.01;
+    velocityRef.current *= deceleration;
+    
+    // Корректировка на финальной стадии для точной остановки
+    if (velocityRef.current < 1) {
+      const currentNormalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const diff = targetFinalAngle - currentNormalized;
       
-      const duration = 7000;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-      const easedProgress = easeOutCubic(progress);
-      
-      const totalRotation = velocityRef.current * 0.07;
-      angleRef.current = initialAngleRef.current + totalRotation * easedProgress;
-      
-      if (progress > 0.9) {
-        const currentNormalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-        const diff = targetFinalAngle - currentNormalized;
-        const smoothingFactor = 0.1 * (1 - (progress - 0.9) * 10);
-        angleRef.current += diff * smoothingFactor;
-      }
-      
-      if (progress >= 1) {
+      if (Math.abs(diff) > 0.01) {
+        angleRef.current += diff * 0.1; // Плавная подгонка к целевому углу
+      } else {
+        // Достигли целевого угла
         angleRef.current = targetFinalAngle;
         velocityRef.current = 0;
       }
-    } else {
-      const duration = 7000;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
-      const deceleration = 0.985 + (0.015 * easeOutQuart(progress));
-      
-      angleRef.current += velocityRef.current * 0.01;
-      velocityRef.current *= deceleration;
     }
-    
-    drawWheel();
-    updateCurrentParticipant();
-    
-    if (velocityRef.current > 0.05 || (targetWinnerIndexRef.current !== null && elapsed < 7000)) {
-      animationRef.current = requestAnimationFrame(animate);
-    } else {
-      const winnerIndex = getCurrentSegmentIndex();
-      if (winnerIndex >= 0 && winnerIndex < participants.length) {
-        const winner = participants[winnerIndex];
-        selectedWinnerRef.current = winner;
-        if (onComplete) {
-          onComplete(winner);
-        }
+  } else {
+    // Обычная случайная анимация
+    const deceleration = 0.985;
+    angleRef.current += velocityRef.current * 0.01;
+    velocityRef.current *= deceleration;
+  }
+  
+  drawWheel();
+  updateCurrentParticipant();
+  
+  if (velocityRef.current > 0.05) {
+    animationRef.current = requestAnimationFrame(animate);
+  } else {
+    // Animation complete
+    const winnerIndex = getCurrentSegmentIndex();
+    if (winnerIndex >= 0 && winnerIndex < participants.length) {
+      const winner = participants[winnerIndex];
+      selectedWinnerRef.current = winner;
+      if (onComplete) {
+        onComplete(winner);
       }
     }
-  };
+  }
+};
 
   return (
     <div className="relative flex flex-col items-center">
+      {/* Current participant display */}
       {currentParticipant && participants.length > 0 && (
         <div className="mb-4 text-center">
           <p className="text-sm text-gray-600 mb-1">Сейчас под стрелкой:</p>
@@ -263,6 +250,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
         </div>
       )}
 
+      {/* Prize display */}
       {currentPrize && (
         <div className="mb-4 text-center">
           <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg shadow-lg px-6 py-3">
@@ -272,12 +260,14 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
         </div>
       )}
 
+      {/* Wheel canvas */}
       <canvas 
         ref={canvasRef} 
         className="mx-auto" 
         style={{ maxWidth: '100%', height: 'auto' }}
       />
       
+      {/* Status display */}
       <div className="mt-4 text-center">
         <p className="text-sm font-semibold text-gray-600">
           {isSpinning ? '🎰 Колесо вращается...' : '⏳ Ожидание розыгрыша...'}
