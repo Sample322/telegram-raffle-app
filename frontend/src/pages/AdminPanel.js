@@ -82,13 +82,13 @@ const AdminPanel = () => {
               <Statistics statistics={statistics} />
             </Tab.Panel>
             <Tab.Panel>
-              <CompletedRafflesList raffles={completedRaffles} onUpdate={loadData} />
-            </Tab.Panel>
-            <Tab.Panel>
               <CreateRaffleForm onSuccess={loadData} />
             </Tab.Panel>
             <Tab.Panel>
               <RafflesList raffles={activeRaffles} onUpdate={loadData} />
+            </Tab.Panel>
+            <Tab.Panel>
+              <CompletedRafflesList raffles={completedRaffles} onUpdate={loadData} />
             </Tab.Panel>
           </Tab.Panels>
         </Tab.Group>
