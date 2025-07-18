@@ -70,6 +70,35 @@ const getCurrentSegmentIndex = () => {
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Добавьте новый ref в начало компонента (после других ref):
+const transitionProgressRef = useRef(1);
+
+// В useEffect для participants добавьте анимацию перехода:
+useEffect(() => {
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+  
+  // Анимация перехода при изменении количества участников
+  if (participants.length > 0 && participants.length !== participantsRef.current?.length) {
+    transitionProgressRef.current = 0;
+    const animateTransition = () => {
+      transitionProgressRef.current += 0.05;
+      if (transitionProgressRef.current < 1) {
+        drawWheel();
+        requestAnimationFrame(animateTransition);
+      } else {
+        transitionProgressRef.current = 1;
+        drawWheel();
+      }
+    };
+    animateTransition();
+  } else {
+    drawWheel();
+  }
+  
+  participantsRef.current = participants;
+  updateCurrentParticipant();
+}, [participants]);
 
     if (participants.length === 0) {
       // Draw empty wheel
@@ -163,77 +192,94 @@ const getCurrentSegmentIndex = () => {
   // Reset selected winner
   selectedWinnerRef.current = null;
   
+  // Сохраняем начальное время и угол для анимации
+  animationStartTimeRef.current = Date.now();
+  initialAngleRef.current = angleRef.current;
+  
   // Если есть предопределенный победитель, вычисляем нужный угол
   if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
     const segmentAngle = (2 * Math.PI) / participants.length;
-    
-    // Целевой угол для остановки на нужном участнике
     const targetSegmentCenter = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
     
-    // Вычисляем, сколько нужно повернуть колесо
-    // Добавляем несколько полных оборотов для эффекта
+    // Вычисляем общее вращение с учетом нескольких оборотов
     const fullRotations = 5 + Math.random() * 3; // 5-8 полных оборотов
     const totalRotation = fullRotations * 2 * Math.PI + (3 * Math.PI / 2 - targetSegmentCenter);
     
-    // Устанавливаем начальную скорость для достижения нужного угла за ~7 секунд
-    velocityRef.current = totalRotation / 7 * 100; // Подгоняем скорость
+    // Устанавливаем скорость пропорционально общему вращению
+    velocityRef.current = totalRotation;
   } else {
-    // Fallback на случайную скорость, если победитель не задан
-    velocityRef.current = 20 + Math.random() * 10;
+    // Fallback на случайную скорость
+    velocityRef.current = (20 + Math.random() * 10) * 2 * Math.PI;
   }
   
   animate();
 };
 
   const animate = () => {
-  if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
-    // Анимация с предопределенным победителем
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    const targetAngle = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
-    const targetFinalAngle = 3 * Math.PI / 2 - targetAngle;
+    const currentTime = Date.now();
+    const elapsed = currentTime - animationStartTimeRef.current;
     
-    // Плавное замедление
-    const deceleration = 0.97;
-    angleRef.current += velocityRef.current * 0.01;
-    velocityRef.current *= deceleration;
-    
-    // Корректировка на финальной стадии для точной остановки
-    if (velocityRef.current < 1) {
-      const currentNormalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-      const diff = targetFinalAngle - currentNormalized;
+    if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
+      // Анимация с предопределенным победителем
+      const segmentAngle = (2 * Math.PI) / participants.length;
+      const targetAngle = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
+      const targetFinalAngle = 3 * Math.PI / 2 - targetAngle;
       
-      if (Math.abs(diff) > 0.01) {
-        angleRef.current += diff * 0.1; // Плавная подгонка к целевому углу
-      } else {
-        // Достигли целевого угла
+      // Используем easing функцию для плавности
+      const duration = 7000; // 7 секунд
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing function: ease-out-cubic
+      const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+      const easedProgress = easeOutCubic(progress);
+      
+      // Вычисляем текущий угол с учетом easing
+      const totalRotation = velocityRef.current * 0.07; // общее вращение
+      angleRef.current = initialAngleRef.current + totalRotation * easedProgress;
+      
+      // В последние 10% анимации делаем точную подгонку
+      if (progress > 0.9) {
+        const currentNormalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        const diff = targetFinalAngle - currentNormalized;
+        const smoothingFactor = 0.1 * (1 - (progress - 0.9) * 10); // Уменьшаем фактор к концу
+        angleRef.current += diff * smoothingFactor;
+      }
+      
+      // Проверяем завершение
+      if (progress >= 1) {
         angleRef.current = targetFinalAngle;
         velocityRef.current = 0;
       }
+    } else {
+      // Обычная случайная анимация с easing
+      const duration = 7000;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing для случайной анимации
+      const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
+      const deceleration = 0.985 + (0.015 * easeOutQuart(progress));
+      
+      angleRef.current += velocityRef.current * 0.01;
+      velocityRef.current *= deceleration;
     }
-  } else {
-    // Обычная случайная анимация
-    const deceleration = 0.985;
-    angleRef.current += velocityRef.current * 0.01;
-    velocityRef.current *= deceleration;
-  }
-  
-  drawWheel();
-  updateCurrentParticipant();
-  
-  if (velocityRef.current > 0.05) {
-    animationRef.current = requestAnimationFrame(animate);
-  } else {
-    // Animation complete
-    const winnerIndex = getCurrentSegmentIndex();
-    if (winnerIndex >= 0 && winnerIndex < participants.length) {
-      const winner = participants[winnerIndex];
-      selectedWinnerRef.current = winner;
-      if (onComplete) {
-        onComplete(winner);
+    
+    drawWheel();
+    updateCurrentParticipant();
+    
+    if (velocityRef.current > 0.05 || (targetWinnerIndexRef.current !== null && elapsed < 7000)) {
+      animationRef.current = requestAnimationFrame(animate);
+    } else {
+      // Animation complete
+      const winnerIndex = getCurrentSegmentIndex();
+      if (winnerIndex >= 0 && winnerIndex < participants.length) {
+        const winner = participants[winnerIndex];
+        selectedWinnerRef.current = winner;
+        if (onComplete) {
+          onComplete(winner);
+        }
       }
     }
-  }
-};
+  };
 
   return (
     <div className="relative flex flex-col items-center">

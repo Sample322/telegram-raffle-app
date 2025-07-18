@@ -5,7 +5,7 @@ import api from '../services/api';
 import CreateRaffleForm from '../components/admin/CreateRaffleForm';
 import RafflesList from '../components/admin/RafflesList';
 import Statistics from '../components/admin/Statistics';
-
+import CompletedRafflesList from '../components/admin/CompletedRafflesList';
 function classNames(...classes) {
   return classes.filter(Boolean).join(' ');
 }
@@ -18,28 +18,31 @@ const AdminPanel = () => {
   useEffect(() => {
     loadData();
   }, []);
-
+  const [completedRaffles, setCompletedRaffles] = useState([]);
   const loadData = async () => {
-    try {
-      const [statsRes, rafflesRes] = await Promise.all([
-        api.get('/admin/statistics'),
-        api.get('/raffles/active')
-      ]);
-      
-      setStatistics(statsRes.data);
-      setActiveRaffles(rafflesRes.data);
-    } catch (error) {
-      toast.error('Ошибка загрузки данных');
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    const [statsRes, rafflesRes, completedRes] = await Promise.all([
+      api.get('/admin/statistics'),
+      api.get('/raffles/active'),
+      api.get('/raffles/completed?limit=50')
+    ]);
+    
+    setStatistics(statsRes.data);
+    setActiveRaffles(rafflesRes.data);
+    setCompletedRaffles(completedRes.data);
+  } catch (error) {
+    toast.error('Ошибка загрузки данных');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const tabs = [
-    { name: 'Статистика', component: Statistics },
-    { name: 'Создать розыгрыш', component: CreateRaffleForm },
-    { name: 'Активные розыгрыши', component: RafflesList },
-  ];
+  { name: 'Статистика', component: Statistics },
+  { name: 'Создать розыгрыш', component: CreateRaffleForm },
+  { name: 'Активные розыгрыши', component: RafflesList },
+  { name: 'Завершенные розыгрыши', component: CompletedRafflesList },
+];
 
   if (loading) {
     return (
@@ -77,6 +80,9 @@ const AdminPanel = () => {
           <Tab.Panels>
             <Tab.Panel>
               <Statistics statistics={statistics} />
+            </Tab.Panel>
+            <Tab.Panel>
+              <CompletedRafflesList raffles={completedRaffles} onUpdate={loadData} />
             </Tab.Panel>
             <Tab.Panel>
               <CreateRaffleForm onSuccess={loadData} />
