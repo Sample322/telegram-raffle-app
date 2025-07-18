@@ -196,13 +196,28 @@ function LiveRafflePage() {
     );
   }
 
-  // Format participant data for the wheel
-  const wheelParticipants = currentRound?.participants || participants.map(p => ({
+  /* -------------------------------------------------------------
+   Формируем список участников для колеса,
+   исключая тех, кто уже есть в winners.
+------------------------------------------------------------- */
+
+const eliminatedIds = winners.map(
+  w => (
+    (w.winner?.id) ||          // если winner приходит так
+    (w.user?.telegram_id) ||   // или так
+    (w.user?.id)               // или так
+  )
+);
+
+const wheelParticipants =
+  (currentRound?.participants || participants.map(p => ({
     id: p.telegram_id,
     username: p.username,
     first_name: p.first_name,
     last_name: p.last_name
-  }));
+  })))
+  .filter(p => !eliminatedIds.includes(p.id));
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
