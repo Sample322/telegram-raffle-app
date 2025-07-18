@@ -1,15 +1,17 @@
-// frontend/src/pages/HomePage.js - ОБНОВЛЕННЫЙ ФАЙЛ
-
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { CogIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import RaffleCard from '../components/RaffleCard';
 import CompletedRaffleCard from '../components/CompletedRaffleCard';
+import { useAuth } from '../contexts/AuthContext';
 
 function HomePage() {
   const [activeRaffles, setActiveRaffles] = useState([]);
   const [completedRaffles, setCompletedRaffles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { isAdmin } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadRaffles();
@@ -48,7 +50,20 @@ function HomePage() {
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">🎉 Розыгрыши</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-800">🎉 Розыгрыши</h1>
+        
+        {/* Кнопка админ-панели */}
+        {isAdmin && (
+          <button
+            onClick={() => navigate('/admin')}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <CogIcon className="h-5 w-5" />
+            <span>Админ-панель</span>
+          </button>
+        )}
+      </div>
       
       {/* Active Raffles */}
       <div className="mb-8">

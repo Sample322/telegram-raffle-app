@@ -1,13 +1,12 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 import asyncio
 import random
 import json
 from typing import List, Dict
 from datetime import datetime
 import logging
-
 from ..database import get_db, async_session_maker
 from ..models import Raffle, Participant, User, Winner
 from ..websocket_manager import manager
@@ -47,8 +46,6 @@ class RaffleWheel:
             
             # Shuffle participants
             participants_list = list(participants)
-            random.shuffle(participants_list)
-            
             winners = []
             remaining_participants = participants_list.copy()
             
@@ -62,20 +59,14 @@ class RaffleWheel:
             await asyncio.sleep(3)  # Pause before starting
             
             # Start from last place to first
-            # Start from last place to first
             sorted_positions = sorted(raffle.prizes.keys(), key=lambda x: int(x), reverse=True)
             for position in sorted_positions:
                 if not remaining_participants:
                     break
                 
-                # ВАЖНО: Выбираем победителя ЗАРАНЕЕ на бэкенде
-                winner = random.choice(remaining_participants)
-                winner_index = participants_list.index(winner)  # Индекс победителя в исходном списке
-                remaining_participants.remove(winner)
-                
-                # Prepare participant data for wheel
+                # Prepare participant data for wheel (БЕЗ предопределения победителя!)
                 wheel_participants = []
-                for p in participants_list:  # Используем полный список, не remaining
+                for p in remaining_participants:
                     wheel_participants.append({
                         "id": p.telegram_id,
                         "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
@@ -83,102 +74,22 @@ class RaffleWheel:
                         "last_name": p.last_name
                     })
                 
-                # Send wheel data с информацией о победителе
+                # Send wheel data БЕЗ winner_index
                 await manager.broadcast({
                     "type": "wheel_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
-                    "participants": wheel_participants,
-                    "winner_index": winner_index  # НОВОЕ: передаем индекс победителя
+                    "participants": wheel_participants
                 }, raffle_id)
                 
-                logger.info(f"Starting wheel for position {position}, predetermined winner index: {winner_index}")
+                logger.info(f"Starting wheel for position {position}")
                 
-                # Wait for wheel animation (7 seconds)
-                await asyncio.sleep(7)
+                # Wait for wheel result from frontend
+                # Frontend will send the winner back
+                await asyncio.sleep(8)  # Increased time for natural spinning
                 
-                # Save winner to database
-                winner_record = Winner(
-                    raffle_id=raffle_id,
-                    user_id=winner.id,
-                    position=int(position),
-                    prize=raffle.prizes[position]
-                )
-                db.add(winner_record)
-                await db.commit()
-                
-                winner_data = {
-                    "position": int(position),
-                    "user": {
-                        "id": winner.telegram_id,
-                        "username": winner.username,
-                        "first_name": winner.first_name,
-                        "last_name": winner.last_name
-                    },
-                    "prize": raffle.prizes[position]
-                }
-                winners.append(winner_data)
-                
-                # Send winner result
-                await manager.broadcast({
-                    "type": "winner_selected",
-                    "position": int(position),
-                    "winner": {
-                        "id": winner.telegram_id,
-                        "username": winner.username or f"{winner.first_name} {winner.last_name or ''}".strip(),
-                        "first_name": winner.first_name,
-                        "last_name": winner.last_name
-                    },
-                    "prize": raffle.prizes[position]
-                }, raffle_id)
-                
-                logger.info(f"Winner for position {position}: {winner.username or winner.first_name}")
-                
-                # Pause between rounds
-                if position != "1":  # Don't pause after last winner
-                    await asyncio.sleep(3)
-            
-            # Mark raffle as completed
-            raffle.is_completed = True
-            raffle.is_active = False
-            await db.commit()
-            
-            # Send final results
-            await manager.broadcast({
-                "type": "raffle_complete",
-                "winners": winners
-            }, raffle_id)
-            
-            logger.info(f"Raffle {raffle_id} completed successfully")
-            
-            # Send notifications about completion
-            await NotificationService.notify_winners(raffle_id, winners)
-            
-            # Get all users to notify
-            users_result = await db.execute(
-                select(User).where(User.notifications_enabled == True)
-            )
-            users = users_result.scalars().all()
-            
-            # Also get participants
-            participants_result = await db.execute(
-                select(User).join(Participant).where(Participant.raffle_id == raffle_id)
-            )
-            participants = participants_result.scalars().all()
-            
-            # Combine and deduplicate user IDs
-            all_user_ids = list(set([u.telegram_id for u in users] + [p.telegram_id for p in participants]))
-            
-            # Send completion notifications
-            await TelegramService.notify_raffle_complete(
-                raffle_id,
-                all_user_ids,
-                {
-                    "title": raffle.title,
-                    "photo_url": raffle.photo_url
-                },
-                winners
-            )
+            # После всех раундов отмечаем розыгрыш как завершенный
+            # (winners уже сохранены через handle_winner_selected)
             
         except Exception as e:
             logger.error(f"Error running wheel for raffle {raffle_id}: {e}")
@@ -215,13 +126,103 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
             # Keep connection alive
             data = await websocket.receive_text()
             
-            # Handle admin commands if needed
+            # Handle messages from frontend
             try:
                 message = json.loads(data)
+                
                 if message.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
+                    
+                # НОВОЕ: Обработка результата от фронтенда
+                elif message.get("type") == "winner_selected":
+                    async with async_session_maker() as db:
+                        await handle_winner_selected(
+                            db,
+                            raffle_id,
+                            message.get("winner"),
+                            message.get("position"),
+                            message.get("prize")
+                        )
+                        
             except:
                 pass
                     
     except WebSocketDisconnect:
         manager.disconnect(websocket, raffle_id)
+
+async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str):
+    """Handle winner selection from frontend"""
+    try:
+        # Find user by telegram_id
+        user_result = await db.execute(
+            select(User).where(User.telegram_id == winner_data['id'])
+        )
+        user = user_result.scalar_one_or_none()
+        
+        if user:
+            # Save winner to database
+            winner_record = Winner(
+                raffle_id=raffle_id,
+                user_id=user.id,
+                position=position,
+                prize=prize
+            )
+            db.add(winner_record)
+            await db.commit()
+            
+            # Broadcast winner to all clients
+            await manager.broadcast({
+                "type": "winner_confirmed",
+                "position": position,
+                "winner": winner_data,
+                "prize": prize
+            }, raffle_id)
+            
+            logger.info(f"Winner saved for position {position}: {winner_data['username']}")
+            
+            # Check if all prizes have been distributed
+            raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
+            raffle = raffle_result.scalar_one_or_none()
+            
+            winners_count_result = await db.execute(
+                select(func.count(Winner.id)).where(Winner.raffle_id == raffle_id)
+            )
+            winners_count = winners_count_result.scalar()
+            
+            if winners_count >= len(raffle.prizes):
+                # All prizes distributed, complete the raffle
+                raffle.is_completed = True
+                raffle.is_active = False
+                await db.commit()
+                
+                # Get all winners for final broadcast
+                winners_result = await db.execute(
+                    select(Winner, User).join(User).where(
+                        Winner.raffle_id == raffle_id
+                    ).order_by(Winner.position)
+                )
+                winners_data = winners_result.all()
+                
+                winners = []
+                for winner, user in winners_data:
+                    winners.append({
+                        "position": winner.position,
+                        "user": {
+                            "id": user.telegram_id,
+                            "username": user.username,
+                            "first_name": user.first_name,
+                            "last_name": user.last_name
+                        },
+                        "prize": winner.prize
+                    })
+                
+                await manager.broadcast({
+                    "type": "raffle_complete",
+                    "winners": winners
+                }, raffle_id)
+                
+                # Send notifications
+                await NotificationService.notify_winners(raffle_id, winners)
+                
+    except Exception as e:
+        logger.error(f"Error handling winner selection: {e}")
