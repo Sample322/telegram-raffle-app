@@ -8,6 +8,10 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, pr
   const [currentParticipant, setCurrentParticipant] = useState(null);
   const selectedWinnerRef = useRef(null);
   const targetWinnerIndexRef = useRef(null);
+  const easeProgressRef     = useRef(0);   // таймлайн анимации
+  const animationStartTimeRef = useRef(0); // для плавного расчёта
+  const initialAngleRef       = useRef(0); // угол в момент старта
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -159,79 +163,78 @@ const getCurrentSegmentIndex = () => {
 
   const startSpin = () => {
   if (participants.length === 0) return;
-  
-  // Reset selected winner
-  selectedWinnerRef.current = null;
-  
-  // Если есть предопределенный победитель, вычисляем нужный угол
-  if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    
-    // Целевой угол для остановки на нужном участнике
-    const targetSegmentCenter = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
-    
-    // Вычисляем, сколько нужно повернуть колесо
-    // Добавляем несколько полных оборотов для эффекта
-    const fullRotations = 5 + Math.random() * 3; // 5-8 полных оборотов
-    const totalRotation = fullRotations * 2 * Math.PI + (3 * Math.PI / 2 - targetSegmentCenter);
-    
-    // Устанавливаем начальную скорость для достижения нужного угла за ~7 секунд
-    velocityRef.current = totalRotation / 7 * 100; // Подгоняем скорость
+
+  selectedWinnerRef.current = null;   // стираем прошлый результат
+  easeProgressRef.current   = 0;      // сброс анимации
+  animationStartTimeRef.current = Date.now();
+  initialAngleRef.current   = angleRef.current;
+
+  if (targetWinnerIndexRef.current !== null &&
+      targetWinnerIndexRef.current >= 0) {
+
+    // вычисляем полный угол, чтобы сделать 5‑8 оборотов
+    const segAngle = (2 * Math.PI) / participants.length;
+    const centerOfTarget =
+      targetWinnerIndexRef.current * segAngle + segAngle / 2;
+
+    const fullTurns   = 5 + Math.random() * 3;   // 5–8 оборотов
+    const totalRotate =
+      fullTurns * 2 * Math.PI + (3 * Math.PI / 2 - centerOfTarget);
+
+    velocityRef.current = totalRotate;           // «стартовая скорость»
   } else {
-    // Fallback на случайную скорость, если победитель не задан
-    velocityRef.current = 20 + Math.random() * 10;
+    velocityRef.current = (20 + Math.random() * 10) * 2 * Math.PI;
   }
-  
+
   animate();
 };
 
-  const animate = () => {
-  if (targetWinnerIndexRef.current !== null && targetWinnerIndexRef.current >= 0) {
-    // Анимация с предопределенным победителем
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    const targetAngle = targetWinnerIndexRef.current * segmentAngle + segmentAngle / 2;
-    const targetFinalAngle = 3 * Math.PI / 2 - targetAngle;
-    
-    // Плавное замедление
-    const deceleration = 0.97;
-    angleRef.current += velocityRef.current * 0.01;
-    velocityRef.current *= deceleration;
-    
-    // Корректировка на финальной стадии для точной остановки
-    if (velocityRef.current < 1) {
-      const currentNormalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-      const diff = targetFinalAngle - currentNormalized;
-      
-      if (Math.abs(diff) > 0.01) {
-        angleRef.current += diff * 0.1; // Плавная подгонка к целевому углу
-      } else {
-        // Достигли целевого угла
-        angleRef.current = targetFinalAngle;
-        velocityRef.current = 0;
-      }
-    }
-  } else {
-    // Обычная случайная анимация
-    const deceleration = 0.985;
-    angleRef.current += velocityRef.current * 0.01;
-    velocityRef.current *= deceleration;
+
+ const animate = () => {
+  /* 1. плавное замедление (ease‑out‑quart) */
+  const DURATION = 6500;                 // мс
+  const STEP_MS  = 16;                   // ~60 FPS
+
+  easeProgressRef.current += STEP_MS;
+  const t          = Math.min(easeProgressRef.current / DURATION, 1);
+  const easeQuart  = (x) => 1 - Math.pow(1 - x, 4);
+  const eased      = easeQuart(t);
+
+  /* 2. сдвигаем колесо и постепенно тормозим */
+  angleRef.current += (velocityRef.current / DURATION) * STEP_MS;
+  velocityRef.current *= 0.985;          // коэффициент торможения
+
+  /* 3. в последние 10 % плавно «прижимаемся» к нужному сектору */
+  if (targetWinnerIndexRef.current !== null && t > 0.9) {
+    const seg = (2 * Math.PI) / participants.length;
+    const mustBe =
+      3 * Math.PI / 2 -
+      (targetWinnerIndexRef.current * seg + seg / 2);
+
+    const now = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) %
+                (2 * Math.PI);
+
+    angleRef.current += (mustBe - now) * 0.1;    // мягкая подгонка
   }
-  
+
+  /* 4. рисуем и обновляем подпись */
   drawWheel();
   updateCurrentParticipant();
-  
+
   if (velocityRef.current > 0.05) {
     animationRef.current = requestAnimationFrame(animate);
   } else {
-    // Animation complete
-    const winnerIndex = getCurrentSegmentIndex();
-    if (winnerIndex >= 0 && winnerIndex < participants.length) {
-      const winner = participants[winnerIndex];
-      selectedWinnerRef.current = winner;
-      if (onComplete) {
-        onComplete(winner);
-      }
+    /* финальный «щёлк» точно на сектор */
+    if (targetWinnerIndexRef.current !== null) {
+      const seg = (2 * Math.PI) / participants.length;
+      angleRef.current =
+        3 * Math.PI / 2 -
+        (targetWinnerIndexRef.current * seg + seg / 2);
     }
+
+    const wi = getCurrentSegmentIndex();
+    const winner = participants[wi];
+    onComplete && onComplete(winner);
   }
 };
 

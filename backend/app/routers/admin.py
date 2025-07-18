@@ -6,7 +6,7 @@ import os
 import uuid
 from datetime import datetime
 import aiohttp
-
+from sqlalchemy import select, delete
 from ..database import get_db
 from ..models import Raffle, User, Admin
 from ..schemas import RaffleCreate, Raffle as RaffleSchema
@@ -151,6 +151,27 @@ async def end_raffle_manually(
     await db.commit()
     
     return {"status": "success", "message": "Raffle will end soon"}
+
+@router.delete("/raffles/{raffle_id}")
+async def delete_raffle(
+    raffle_id: int,
+    current_admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Полностью удалить розыгрыш вместе с участниками и победителями."""
+    # Проверяем наличие
+    result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
+    raffle = result.scalar_one_or_none()
+    if not raffle:
+        raise HTTPException(status_code=404, detail="Raffle not found")
+
+    # Удаляем каскадом: winners → participants → raffle
+    await db.execute(delete(Winner).where(Winner.raffle_id == raffle_id))
+    await db.execute(delete(Participant).where(Participant.raffle_id == raffle_id))
+    await db.delete(raffle)
+    await db.commit()
+    return {"status": "success"}
+
 
 @router.get("/statistics")
 async def get_statistics(

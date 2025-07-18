@@ -5,6 +5,9 @@ import api from '../services/api';
 import CreateRaffleForm from '../components/admin/CreateRaffleForm';
 import RafflesList from '../components/admin/RafflesList';
 import Statistics from '../components/admin/Statistics';
+import CompletedRafflesList from '../components/admin/CompletedRafflesList';
+
+const [completedRaffles, setCompletedRaffles] = useState([]);
 
 function classNames(...classes) {
   return classes.filter(Boolean).join(' ');
@@ -21,13 +24,16 @@ const AdminPanel = () => {
 
   const loadData = async () => {
     try {
-      const [statsRes, rafflesRes] = await Promise.all([
+      const [statsRes, activeRes, completedRes] = await Promise.all([
         api.get('/admin/statistics'),
-        api.get('/raffles/active')
+        api.get('/raffles/active'),
+        api.get('/raffles/completed?limit=50')
       ]);
-      
+
       setStatistics(statsRes.data);
-      setActiveRaffles(rafflesRes.data);
+      setActiveRaffles(activeRes.data);
+      setCompletedRaffles(completedRes.data);
+
     } catch (error) {
       toast.error('Ошибка загрузки данных');
     } finally {
@@ -39,6 +45,7 @@ const AdminPanel = () => {
     { name: 'Статистика', component: Statistics },
     { name: 'Создать розыгрыш', component: CreateRaffleForm },
     { name: 'Активные розыгрыши', component: RafflesList },
+    { name: 'Завершённые розыгрыши', component: CompletedRafflesList },
   ];
 
   if (loading) {
@@ -84,6 +91,10 @@ const AdminPanel = () => {
             <Tab.Panel>
               <RafflesList raffles={activeRaffles} onUpdate={loadData} />
             </Tab.Panel>
+            <Tab.Panel>
+              <CompletedRafflesList raffles={completedRaffles} onUpdate={loadData} />
+            </Tab.Panel>
+
           </Tab.Panels>
         </Tab.Group>
       </div>
