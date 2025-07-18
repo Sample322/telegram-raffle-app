@@ -6,6 +6,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const velocityRef = useRef(0);
   const animationRef = useRef(null);
   const [currentParticipant, setCurrentParticipant] = useState(null);
+  const hasNotifiedRef = useRef(false); // Чтобы не отправлять результат дважды
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -24,6 +25,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
 
   useEffect(() => {
     if (isSpinning && participants.length > 0) {
+      hasNotifiedRef.current = false; // Сброс флага
       startSpin();
     }
   }, [isSpinning, participants]);
@@ -45,9 +47,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     const index = getCurrentSegmentIndex();
     if (index >= 0 && index < participants.length) {
       const participant = participants[index];
-      if (!currentParticipant || participant.id !== currentParticipant.id) {
-        setCurrentParticipant(participant);
-      }
+      setCurrentParticipant(participant);
     }
   };
 
@@ -144,9 +144,6 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
-
-    // Update current participant display
-    updateCurrentParticipant();
   };
 
   const startSpin = () => {
@@ -167,6 +164,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     
     // Рисуем
     drawWheel();
+    
+    // ВАЖНО: обновляем текущего участника на каждом кадре
     updateCurrentParticipant();
 
     // Продолжаем анимацию пока скорость достаточна
@@ -174,21 +173,29 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
       animationRef.current = requestAnimationFrame(animate);
     } else {
       // Колесо остановилось
-      const winnerIndex = getCurrentSegmentIndex();
-      const winner = participants[winnerIndex];
-      
-      if (winner && socket && currentPrize) {
-        // Отправляем результат на сервер
-        socket.send(JSON.stringify({
-          type: 'winner_selected',
-          winner: winner,
-          position: currentPrize.position,
-          prize: currentPrize.prize
-        }));
+      if (!hasNotifiedRef.current) {
+        hasNotifiedRef.current = true;
+        
+        const winnerIndex = getCurrentSegmentIndex();
+        const winner = participants[winnerIndex];
+        
+        console.log('Wheel stopped. Winner:', winner);
+        
+        if (winner && socket && socket.readyState === WebSocket.OPEN && currentPrize) {
+          // Отправляем результат на сервер
+          const message = {
+            type: 'winner_selected',
+            winner: winner,
+            position: currentPrize.position,
+            prize: currentPrize.prize
+          };
+          console.log('Sending winner to server:', message);
+          socket.send(JSON.stringify(message));
+        }
+        
+        // Вызываем callback
+        onComplete && onComplete(winner);
       }
-      
-      // Вызываем callback
-      onComplete && onComplete(winner);
     }
   };
 
@@ -198,7 +205,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
       {currentParticipant && participants.length > 0 && (
         <div className="mb-4 text-center">
           <p className="text-sm text-gray-600 mb-1">Сейчас под стрелкой:</p>
-          <div className="bg-white rounded-lg shadow-lg px-6 py-3 animate-pulse">
+          <div className="bg-white rounded-lg shadow-lg px-6 py-3">
             <p className="text-xl font-bold text-gray-800">
               {currentParticipant.username || 
                `${currentParticipant.first_name || ''} ${currentParticipant.last_name || ''}`.trim()}
