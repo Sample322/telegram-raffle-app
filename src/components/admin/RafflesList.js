@@ -4,11 +4,9 @@ import {
   EyeIcon, 
   XMarkIcon,
   ClockIcon,
-  UsersIcon,
-  TrashIcon // Добавьте эту строку
+  UsersIcon 
 } from '@heroicons/react/24/outline';
 import api from '../../services/api';
-
 
 const RafflesList = ({ raffles, onUpdate }) => {
   const [loading, setLoading] = useState({});
@@ -30,23 +28,6 @@ const RafflesList = ({ raffles, onUpdate }) => {
       setLoading(prev => ({ ...prev, [raffleId]: false }));
     }
   };
-  const handleDeleteRaffle = async (raffleId) => {
-  if (!window.confirm('Вы уверены, что хотите УДАЛИТЬ этот розыгрыш? Это действие необратимо!')) {
-    return;
-  }
-
-  setLoading(prev => ({ ...prev, [`delete_${raffleId}`]: true }));
-
-  try {
-    await api.delete(`/admin/raffles/${raffleId}`);
-    toast.success('Розыгрыш успешно удален');
-    if (onUpdate) onUpdate();
-  } catch (error) {
-    toast.error('Ошибка при удалении розыгрыша');
-  } finally {
-    setLoading(prev => ({ ...prev, [`delete_${raffleId}`]: false }));
-  }
-};
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -110,14 +91,6 @@ const RafflesList = ({ raffles, onUpdate }) => {
               >
                 <EyeIcon className="h-5 w-5" />
               </a>
-              <button
-                onClick={() => handleDeleteRaffle(raffle.id)}
-                disabled={loading[`delete_${raffle.id}`]}
-                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                title="Удалить розыгрыш"
-              >
-                <TrashIcon className="h-5 w-5" />
-              </button>
               <button
                 onClick={() => handleEndRaffle(raffle.id)}
                 disabled={loading[raffle.id]}
