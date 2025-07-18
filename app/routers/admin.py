@@ -8,7 +8,7 @@ from datetime import datetime
 import aiohttp
 from sqlalchemy import select, func, delete
 from ..database import get_db
-from ..models import Raffle, User, Admin
+from ..models import Raffle, User, Admin, Winner, Participant
 from ..schemas import RaffleCreate, Raffle as RaffleSchema
 from ..services.telegram import TelegramService
 from ..utils.auth import get_current_admin
