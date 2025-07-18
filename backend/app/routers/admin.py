@@ -1,14 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from typing import List
 import os
 import uuid
 from datetime import datetime
 import aiohttp
-from sqlalchemy import select, delete
 from ..database import get_db
-from ..models import Raffle, User, Admin
+from ..models import Raffle, User, Admin, Winner, Participant  # Добавлены Winner и Participant!
 from ..schemas import RaffleCreate, Raffle as RaffleSchema
 from ..services.telegram import TelegramService
 from ..utils.auth import get_current_admin
