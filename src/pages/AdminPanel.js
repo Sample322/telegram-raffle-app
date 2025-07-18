@@ -7,8 +7,6 @@ import RafflesList from '../components/admin/RafflesList';
 import Statistics from '../components/admin/Statistics';
 import CompletedRafflesList from '../components/admin/CompletedRafflesList';
 
-const [completedRaffles, setCompletedRaffles] = useState([]);
-
 function classNames(...classes) {
   return classes.filter(Boolean).join(' ');
 }
@@ -16,6 +14,7 @@ function classNames(...classes) {
 const AdminPanel = () => {
   const [statistics, setStatistics] = useState(null);
   const [activeRaffles, setActiveRaffles] = useState([]);
+  const [completedRaffles, setCompletedRaffles] = useState([]); // Эта строка должна быть ВНУТРИ компонента!
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -94,7 +93,6 @@ const AdminPanel = () => {
             <Tab.Panel>
               <CompletedRafflesList raffles={completedRaffles} onUpdate={loadData} />
             </Tab.Panel>
-
           </Tab.Panels>
         </Tab.Group>
       </div>
