@@ -102,7 +102,7 @@ function LiveRafflePage() {
           toast(`🎰 Разыгрывается ${data.position} место!`);
           break;
           
-        case 'winner_selected':
+        case 'winner_confirmed':
           setWinners(prev => {
             const updated = [...prev];
             const existingIndex = updated.findIndex(w => w.position === data.position);
@@ -201,22 +201,22 @@ function LiveRafflePage() {
    исключая тех, кто уже есть в winners.
 ------------------------------------------------------------- */
 
-const eliminatedIds = winners.map(
-  w => (
-    (w.winner?.id) ||          // если winner приходит так
-    (w.user?.telegram_id) ||   // или так
-    (w.user?.id)               // или так
-  )
-);
+  const eliminatedIds = winners.map(
+    w => (
+      (w.winner?.id) ||          // если winner приходит так
+      (w.user?.telegram_id) ||   // или так
+      (w.user?.id)               // или так
+    )
+  );
 
-const wheelParticipants =
-  (currentRound?.participants || participants.map(p => ({
-    id: p.telegram_id,
-    username: p.username,
-    first_name: p.first_name,
-    last_name: p.last_name
-  })))
-  .filter(p => !eliminatedIds.includes(p.id));
+  const wheelParticipants =
+    (currentRound?.participants || participants.map(p => ({
+      id: p.telegram_id,
+      username: p.username,
+      first_name: p.first_name,
+      last_name: p.last_name
+    })))
+    .filter(p => !eliminatedIds.includes(p.id));
 
 
   return (
