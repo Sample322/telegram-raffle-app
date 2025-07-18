@@ -18,6 +18,7 @@ function LiveRafflePage() {
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [predeterminedWinnerIndex, setPredeterminedWinnerIndex] = useState(null);
+  const [eliminatedParticipants, setEliminatedParticipants] = useState(new Set());
   useEffect(() => {
     loadRaffleData();
     connectWebSocket();
@@ -113,7 +114,16 @@ function LiveRafflePage() {
             }
             return updated;
           });
+          
+          // Добавляем победителя в список исключенных
+          setEliminatedParticipants(prev => {
+            const newSet = new Set(prev);
+            newSet.add(data.winner.id);
+            return newSet;
+          });
+          
           setIsSpinning(false);
+          setPredeterminedWinnerIndex(null); // Сбрасываем индекс
           toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
           break;
           
@@ -196,14 +206,15 @@ function LiveRafflePage() {
     );
   }
 
-  // Format participant data for the wheel
-  const wheelParticipants = currentRound?.participants || participants.map(p => ({
-    id: p.telegram_id,
-    username: p.username,
-    first_name: p.first_name,
-    last_name: p.last_name
-  }));
+  // Фильтруем участников, исключая уже выигравших
+const filteredParticipants = (currentRound?.participants || participants.map(p => ({
+  id: p.telegram_id,
+  username: p.username,
+  first_name: p.first_name,
+  last_name: p.last_name
+  }))).filter(p => !eliminatedParticipants.has(p.id));
 
+const wheelParticipants = filteredParticipants;
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
       {/* Navigation Header */}
