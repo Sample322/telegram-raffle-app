@@ -73,7 +73,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow()}
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 # WebSocket endpoint for raffle wheel
 @app.websocket("/ws/raffle/{raffle_id}")

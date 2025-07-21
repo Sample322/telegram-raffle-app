@@ -1,18 +1,30 @@
 version: '3.8'
 
 services:
-  # ПЕРВЫЙ СЕРВИС - получит домен sample322-telegram-raffle-app-c012.twc1.net
-  frontend:
+  # ПЕРВЫЙ сервис - получает домен и должен отвечать на порту 80
+  nginx:
+    image: nginx:alpine
+    expose: 
+      - "80"  # ВАЖНО: expose, не ports!
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend-static
+    command: ["nginx", "-g", "daemon off;"]
+    restart: always
+
+  # Статические файлы фронтенда
+  frontend-static:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    command: ["nginx", "-g", "daemon off;"]
-    expose: 
-      - "80"
-    depends_on:
-      - backend
+    volumes:
+      - frontend-build:/app/build
+    command: ["sh", "-c", "cp -r /usr/share/nginx/html/* /app/build/ && tail -f /dev/null"]
     restart: always
 
+  # Backend API
   backend:
     build:
       context: ./backend
@@ -40,6 +52,7 @@ services:
       timeout: 10s
       retries: 3
 
+  # Telegram bot
   bot:
     build:
       context: ./bot
@@ -52,3 +65,6 @@ services:
     depends_on:
       - backend
     restart: always
+
+volumes:
+  frontend-build:
