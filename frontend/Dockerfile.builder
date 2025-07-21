@@ -17,7 +17,7 @@ RUN npm run build
 # Финальная стадия - просто копируем build
 FROM alpine:latest
 WORKDIR /app
-COPY --from=builder /app/build ./build
+COPY --from=builder /app/build ./build_src
 
 # Команда для копирования build в volume
-CMD ["sh", "-c", "cp -r /app/build/* /app/build/"]
+CMD ["sh", "-c", "cp -r /app/build_src/* /app/build/"]

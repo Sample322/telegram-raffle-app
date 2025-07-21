@@ -8,6 +8,7 @@ services:
   expose: ["80"]           # ← добавили
   volumes:
     - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
+    - frontend_build:/usr/share/nginx/html:ro
   depends_on: [backend]
   restart: always
 
@@ -33,33 +34,3 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Telegram Bot
-  bot:
-    build: ./bot
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - WEBAPP_URL=${WEBAPP_URL}
-      - API_URL=http://backend:8000
-      - ADMIN_IDS=${ADMIN_IDS}
-    restart: always
-    depends_on:
-      - backend
-
-  # Frontend builder
-  frontend-builder:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.builder
-    volumes:
-      - frontend_build:/app/build
-    environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL}
-      - REACT_APP_WS_URL=${REACT_APP_WS_URL}
-      - REACT_APP_TELEGRAM_BOT_USERNAME=${REACT_APP_TELEGRAM_BOT_USERNAME}
-
-volumes:
-  frontend_build:
