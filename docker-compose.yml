@@ -43,7 +43,7 @@ services:
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - WEBAPP_URL=${WEBAPP_URL}
-      - API_URL=${API_URL}
+      - API_URL=http://backend:8000
       - ADMIN_IDS=${ADMIN_IDS}
     restart: always
     depends_on:
