@@ -5,13 +5,11 @@ from contextlib import asynccontextmanager
 import asyncio
 import os
 from datetime import datetime
-import json
 
 from .database import init_db
 from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
-from .websocket_manager import manager
-
+from .websocket_manager import manager  # Импортируем из нового файла
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,27 +27,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 
-@app.get("/test")
-async def test():
-    return {"message": "Backend is working!"}
+# Замените настройки CORS middleware в backend/app/main.py на эти:
 
-# Dynamic CORS configuration for Timeweb
-cors_origins_str = os.getenv("CORS_ORIGINS", '["http://localhost:3000"]')
-try:
-    cors_origins = json.loads(cors_origins_str)
-except:
-    cors_origins = ["http://localhost:3000"]
+# В файле backend/app/main.py замените CORS middleware на:
 
-# Add wildcard for Timeweb subdomains
-cors_origins.extend([
-    "https://*.twc1.net",
-    "http://localhost:3000",
-    "http://localhost:3001"
-])
-
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=[
+        "https://raffle-app-qtma.onrender.com",
+        "https://*.onrender.com",  # Разрешить все Render домены
+        "http://localhost:3000",
+        "http://localhost:3001"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +73,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.utcnow()}
 
 # WebSocket endpoint for raffle wheel
 @app.websocket("/ws/raffle/{raffle_id}")
