@@ -23,6 +23,14 @@ else:
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
     elif DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    
+    # Обработка SSL параметров для asyncpg
+    if "sslmode=" in DATABASE_URL:
+        # Удаляем sslmode из URL и добавляем ssl=require для asyncpg
+        DATABASE_URL = DATABASE_URL.replace("?sslmode=verify-full", "?ssl=require")
+        DATABASE_URL = DATABASE_URL.replace("&sslmode=verify-full", "&ssl=require")
+        DATABASE_URL = DATABASE_URL.replace("?sslmode=require", "?ssl=require")
+        DATABASE_URL = DATABASE_URL.replace("&sslmode=require", "&ssl=require")
 
 logger.info(f"Using database: {DATABASE_URL.split('@')[0] if '@' in DATABASE_URL else DATABASE_URL}")
 
