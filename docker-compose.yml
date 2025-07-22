@@ -1,20 +1,16 @@
 version: '3.8'
 
 services:
-  # Первый сервис - комбинированный nginx с frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     expose: 
       - "80"
-    environment:
-      - BACKEND_URL=http://backend:8000
     depends_on:
       - backend
     restart: always
 
-  # Backend API
   backend:
     build:
       context: ./backend
@@ -27,31 +23,8 @@ services:
       - WEBAPP_URL=${WEBAPP_URL}
       - SECRET_KEY=${SECRET_KEY}
       - ADMIN_IDS=${ADMIN_IDS}
-      - ADMIN_API_KEY=${ADMIN_API_KEY}
-      - TIMEZONE_OFFSET=${TIMEZONE_OFFSET}
-      - CORS_ORIGINS=${CORS_ORIGINS}
-      - ENVIRONMENT=${ENVIRONMENT}
       - S3_ENDPOINT=${S3_ENDPOINT}
       - S3_ACCESS_KEY=${S3_ACCESS_KEY}
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - S3_BUCKET=${S3_BUCKET}
-    restart: always
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Telegram bot
-  bot:
-    build:
-      context: ./bot
-      dockerfile: Dockerfile
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - WEBAPP_URL=${WEBAPP_URL}
-      - API_URL=http://backend:8000
-      - ADMIN_IDS=${ADMIN_IDS}
-    depends_on:
-      - backend
     restart: always
