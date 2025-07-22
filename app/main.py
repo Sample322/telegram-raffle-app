@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 import asyncio
 import os
 from datetime import datetime
+import json
 
 from .database import init_db
 from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
-from .websocket_manager import manager  # Импортируем из нового файла
+from .websocket_manager import manager
 
 
 @asynccontextmanager
@@ -31,19 +32,24 @@ app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 @app.get("/test")
 async def test():
     return {"message": "Backend is working!"}
-# Замените настройки CORS middleware в backend/app/main.py на эти:
 
-# В файле backend/app/main.py замените CORS middleware на:
+# Dynamic CORS configuration for Timeweb
+cors_origins_str = os.getenv("CORS_ORIGINS", '["http://localhost:3000"]')
+try:
+    cors_origins = json.loads(cors_origins_str)
+except:
+    cors_origins = ["http://localhost:3000"]
 
-# CORS middleware - ВАЖНО для Timeweb
+# Add wildcard for Timeweb subdomains
+cors_origins.extend([
+    "https://*.twc1.net",
+    "http://localhost:3000",
+    "http://localhost:3001"
+])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://sample322-telegram-raffle-app-c012.twc1.net",
-        "https://*.twc1.net",
-        "http://localhost:3000",
-        "http://localhost:3001"
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
