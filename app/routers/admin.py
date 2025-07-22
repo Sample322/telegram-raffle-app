@@ -11,7 +11,7 @@ from ..models import Raffle, User, Admin, Winner, Participant  # Добавле�
 from ..schemas import RaffleCreate, Raffle as RaffleSchema
 from ..services.telegram import TelegramService
 from ..utils.auth import get_current_admin
-
+from ..services.s3 import s3_service
 router = APIRouter()
 
 UPLOAD_DIR = "uploads"
@@ -71,24 +71,20 @@ async def upload_image(
     file: UploadFile = File(...),
     current_admin: Admin = Depends(get_current_admin)
 ):
-    """Upload raffle image"""
-    # Validate file type
+    """Upload raffle image to S3"""
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
-    # Generate unique filename
-    file_ext = file.filename.split(".")[-1]
-    file_name = f"{uuid.uuid4()}.{file_ext}"
-    file_path = os.path.join(UPLOAD_DIR, file_name)
+    # Read file content
+    content = await file.read()
     
-    # Save file
-    with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    # Upload to S3
+    url = await s3_service.upload_file(content, file.filename)
     
-    # Return URL
-    return {"url": f"/uploads/{file_name}"}
-
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to upload image")
+    
+    return {"url": url}
 @router.post("/upload-telegram-photo")
 async def upload_telegram_photo(
     file_id: str,
