@@ -11,6 +11,7 @@ from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
 from .websocket_manager import manager  # Импортируем из нового файла
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -27,6 +28,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 
+@app.get("/test")
+async def test():
+    return {"message": "Backend is working!"}
 # Замените настройки CORS middleware в backend/app/main.py на эти:
 
 # В файле backend/app/main.py замените CORS middleware на:

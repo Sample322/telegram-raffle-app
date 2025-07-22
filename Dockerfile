@@ -1,11 +1,11 @@
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
 WORKDIR /app
 
-# Системные пакеты включая curl для healthcheck
+# Логирование для отладки
+RUN echo "Starting backend build..."
+
+# Системные зависимости
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
@@ -14,22 +14,17 @@ RUN apt-get update && apt-get install -y \
 
 # Python зависимости
 COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install boto3
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем приложение
+# Приложение
 COPY . .
 
-# Создаем директорию для загрузок
+# Создаем папку uploads
 RUN mkdir -p uploads
 
-# ВАЖНО: используем EXPOSE, не ports
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+# Проверка установки
+RUN python -c "import fastapi; print('FastAPI installed')"
 
-# ВАЖНО: слушаем на 0.0.0.0
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
