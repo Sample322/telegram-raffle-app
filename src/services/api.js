@@ -1,8 +1,7 @@
 import axios from 'axios';
 import WebApp from '@twa-dev/sdk';
 
-// Use environment variable or relative path
-const API_URL = process.env.REACT_APP_API_URL || '/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_URL,
