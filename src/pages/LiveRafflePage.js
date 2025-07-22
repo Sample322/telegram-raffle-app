@@ -56,10 +56,17 @@ function LiveRafflePage() {
   };
 
   const connectWebSocket = () => {
-    const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
-    console.log('Connecting to WebSocket:', wsUrl);
+  // Динамически определяем WebSocket URL
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  const wsUrl = process.env.REACT_APP_WS_URL 
+    ? `${process.env.REACT_APP_WS_URL}/api/ws/${id}`
+    : `${protocol}//${host}/api/ws/${id}`;
     
-    const ws = new WebSocket(wsUrl);
+  console.log('Connecting to WebSocket:', wsUrl);
+  
+  const ws = new WebSocket(wsUrl);
+  // ... остальной код
 
     ws.onopen = () => {
       console.log('Connected to WebSocket');
