@@ -10,7 +10,6 @@ from .database import init_db
 from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
 from .websocket_manager import manager  # Импортируем из нового файла
-from .routers import bot
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,17 +26,19 @@ async def lifespan(app: FastAPI):
         pass
 
 app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
-app.include_router(bot.router, prefix="/bot", tags=["bot"])
+
 # Замените настройки CORS middleware в backend/app/main.py на эти:
 
 # В файле backend/app/main.py замените CORS middleware на:
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://sample322-telegram-raffle-app-c012.twc1.net",
-        "https://*.twc1.net",  # Разрешить все Timeweb домены
-        "http://localhost:3000",  # Для локальной разработки
+        "https://raffle-app-qtma.onrender.com",
+        "https://*.onrender.com",  # Разрешить все Render домены
+        "http://localhost:3000",
+        "http://localhost:3001"
     ],
     allow_credentials=True,
     allow_methods=["*"],
