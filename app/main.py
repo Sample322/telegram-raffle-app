@@ -31,10 +31,15 @@ app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 
 # В файле backend/app/main.py замените CORS middleware на:
 
-# CORS middleware
+# В backend/app/main.py обновите CORS middleware:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Временно разрешаем все для тестирования
+    allow_origins=[
+        "https://ваш-frontend.twc1.net",  # Добавьте ваш Timeweb frontend URL
+        "https://*.twc1.net",              # Или разрешите все Timeweb домены
+        "http://localhost:3000",
+        "http://localhost:3001"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
