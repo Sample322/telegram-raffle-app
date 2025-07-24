@@ -29,6 +29,8 @@ class Raffle(Base):
     start_date = Column(DateTime(timezone=True), server_default=func.now())
     end_date = Column(DateTime(timezone=True))
     draw_delay_minutes = Column(Integer, default=5)  # Delay before wheel starts
+    wheel_speed = Column(String, default="fast")  # НОВОЕ ПОЛЕ: fast, medium, slow
+    post_channels = Column(JSON, default=list)  # НОВОЕ ПОЛЕ: каналы для публикации
     is_active = Column(Boolean, default=True)
     is_completed = Column(Boolean, default=False)
     draw_started = Column(Boolean, default=False)
@@ -36,6 +38,7 @@ class Raffle(Base):
     
     participants = relationship("Participant", back_populates="raffle")
     winners = relationship("Winner", back_populates="raffle")
+
 
 class Participant(Base):
     __tablename__ = "participants"
