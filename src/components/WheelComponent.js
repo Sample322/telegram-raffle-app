@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId }) => {
+const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, wheelSpeed = 'fast' }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
   const velocityRef = useRef(0);
   const animationRef = useRef(null);
   const [currentParticipant, setCurrentParticipant] = useState(null);
-  const hasNotifiedRef = useRef(false); // Чтобы не отправлять результат дважды
-
+  const hasNotifiedRef = useRef(false);
+  
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -149,15 +149,27 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const startSpin = () => {
     if (participants.length === 0) return;
 
-    // Случайная начальная скорость (естественное вращение)
-    velocityRef.current = 0.3 + Math.random() * 0.2; // Радианы за кадр
+    // Скорость в зависимости от настройки
+    const speedSettings = {
+      fast: { base: 0.3, random: 0.2, friction: 0.985 },
+      medium: { base: 0.1, random: 0.066, friction: 0.990 },
+      slow: { base: 0.05, random: 0.033, friction: 0.992 }
+    };
+    
+    const settings = speedSettings[wheelSpeed] || speedSettings.fast;
+    
+    // Начальная скорость
+    velocityRef.current = settings.base + Math.random() * settings.random;
+    
+    // Сохраняем коэффициент трения для анимации
+    velocityRef.friction = settings.friction;
 
     animate();
   };
 
   const animate = () => {
-    // Естественное замедление
-    velocityRef.current *= 0.985; // Коэффициент трения
+    // Естественное замедление с учетом настроек скорости
+    velocityRef.current *= velocityRef.friction || 0.985;
     
     // Вращаем колесо
     angleRef.current += velocityRef.current;
@@ -165,7 +177,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     // Рисуем
     drawWheel();
     
-    // ВАЖНО: обновляем текущего участника на каждом кадре
+    // Обновляем текущего участника
     updateCurrentParticipant();
 
     // Продолжаем анимацию пока скорость достаточна

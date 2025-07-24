@@ -3,15 +3,18 @@ import { toast } from 'react-hot-toast';
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import api from '../../services/api';
 import { getMoscowTimeForInput, isFutureMoscowTime } from '../../utils/dateUtils';
+
 const CreateRaffleForm = ({ onSuccess }) => {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     photo_url: '',
     channels: [''],
+    post_channels: [''],  // НОВОЕ: каналы для публикации
     prizes: { 1: '' },
     end_date: '',
-    draw_delay_minutes: 5
+    draw_delay_minutes: 5,
+    wheel_speed: 'fast'  // НОВОЕ: скорость колеса
   });
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -45,6 +48,31 @@ const CreateRaffleForm = ({ onSuccess }) => {
     setFormData(prev => ({
       ...prev,
       channels: newChannels
+    }));
+  };
+
+  // НОВЫЕ МЕТОДЫ ДЛЯ КАНАЛОВ ПУБЛИКАЦИИ
+  const handlePostChannelChange = (index, value) => {
+    const newChannels = [...formData.post_channels];
+    newChannels[index] = value;
+    setFormData(prev => ({
+      ...prev,
+      post_channels: newChannels
+    }));
+  };
+
+  const addPostChannel = () => {
+    setFormData(prev => ({
+      ...prev,
+      post_channels: [...prev.post_channels, '']
+    }));
+  };
+
+  const removePostChannel = (index) => {
+    const newChannels = formData.post_channels.filter((_, i) => i !== index);
+    setFormData(prev => ({
+      ...prev,
+      post_channels: newChannels
     }));
   };
 
@@ -120,6 +148,7 @@ const CreateRaffleForm = ({ onSuccess }) => {
     }
 
     const validChannels = formData.channels.filter(ch => ch.trim());
+    const validPostChannels = formData.post_channels.filter(ch => ch.trim()); // ДОБАВЛЕНО
     const validPrizes = Object.fromEntries(
       Object.entries(formData.prizes).filter(([_, prize]) => prize.trim())
     );
@@ -135,6 +164,7 @@ const CreateRaffleForm = ({ onSuccess }) => {
       const payload = {
         ...formData,
         channels: validChannels,
+        post_channels: validPostChannels, // ДОБАВЛЕНО
         prizes: validPrizes,
         end_date: new Date(formData.end_date).toISOString()
       };
@@ -148,9 +178,11 @@ const CreateRaffleForm = ({ onSuccess }) => {
         description: '',
         photo_url: '',
         channels: [''],
+        post_channels: [''], // ДОБАВЛЕНО
         prizes: { 1: '' },
         end_date: '',
-        draw_delay_minutes: 5
+        draw_delay_minutes: 5,
+        wheel_speed: 'fast' // ДОБАВЛЕНО
       });
 
       if (onSuccess) {
@@ -219,7 +251,7 @@ const CreateRaffleForm = ({ onSuccess }) => {
         )}
       </div>
 
-      {/* Channels */}
+      {/* Channels для обязательной подписки */}
       <div className="mb-4">
         <label className="block text-gray-700 text-sm font-bold mb-2">
           Каналы для подписки
@@ -249,6 +281,42 @@ const CreateRaffleForm = ({ onSuccess }) => {
         >
           <PlusIcon className="h-5 w-5 mr-1" />
           Добавить канал
+        </button>
+      </div>
+
+      {/* НОВЫЙ БЛОК: Каналы для публикации */}
+      <div className="mb-4">
+        <label className="block text-gray-700 text-sm font-bold mb-2">
+          Опубликовать розыгрыш в каналах
+          <span className="text-xs font-normal text-gray-500 ml-2">
+            (бот должен быть администратором)
+          </span>
+        </label>
+        {formData.post_channels.map((channel, index) => (
+          <div key={`post_${index}`} className="flex mb-2">
+            <input
+              type="text"
+              value={channel}
+              onChange={(e) => handlePostChannelChange(index, e.target.value)}
+              placeholder="@channel_username"
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => removePostChannel(index)}
+              className="ml-2 text-red-600 hover:text-red-800"
+            >
+              <TrashIcon className="h-5 w-5" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addPostChannel}
+          className="mt-2 flex items-center text-blue-600 hover:text-blue-800"
+        >
+          <PlusIcon className="h-5 w-5 mr-1" />
+          Добавить канал для публикации
         </button>
       </div>
 
@@ -306,7 +374,7 @@ const CreateRaffleForm = ({ onSuccess }) => {
       </div>
 
       {/* Draw Delay */}
-      <div className="mb-6">
+      <div className="mb-4">
         <label className="block text-gray-700 text-sm font-bold mb-2">
           Задержка перед началом розыгрыша (минут)
         </label>
@@ -319,6 +387,23 @@ const CreateRaffleForm = ({ onSuccess }) => {
           max="60"
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
         />
+      </div>
+
+      {/* НОВЫЙ БЛОК: Скорость колеса */}
+      <div className="mb-6">
+        <label className="block text-gray-700 text-sm font-bold mb-2">
+          Скорость вращения колеса
+        </label>
+        <select
+          name="wheel_speed"
+          value={formData.wheel_speed}
+          onChange={handleInputChange}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+        >
+          <option value="fast">Быстро</option>
+          <option value="medium">Средняя (в 3 раза медленнее)</option>
+          <option value="slow">Медленно (в 4.5 раза медленнее)</option>
+        </select>
       </div>
 
       {/* Submit Button */}
