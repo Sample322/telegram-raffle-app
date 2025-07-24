@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId }) => {
+const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, spinSpeed = 'fast' }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
   const velocityRef = useRef(0);
@@ -150,7 +150,11 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     if (participants.length === 0) return;
 
     // Случайная начальная скорость (естественное вращение)
-    velocityRef.current = 0.3 + Math.random() * 0.2; // Радианы за кадр
+    // Случайная начальная скорость (естественное вращение)
+    let base = 0.3 + Math.random() * 0.2; // Радианы за кадр
+    if (spinSpeed === 'medium') base /= 3;
+    if (spinSpeed === 'slow') base /= 4.5;
+    velocityRef.current = base;
 
     animate();
   };

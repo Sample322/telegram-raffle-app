@@ -11,7 +11,8 @@ const CreateRaffleForm = ({ onSuccess }) => {
     channels: [''],
     prizes: { 1: '' },
     end_date: '',
-    draw_delay_minutes: 5
+    draw_delay_minutes: 5,
+    wheel_speed: 'fast'
   });
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -320,7 +321,22 @@ const CreateRaffleForm = ({ onSuccess }) => {
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
         />
       </div>
-
+        {/* Wheel Speed */}
+      <div className="mb-6">
+        <label className="block text-gray-700 text-sm font-bold mb-2">
+          Скорость вращения колеса
+        </label>
+        <select
+          name="wheel_speed"
+          value={formData.wheel_speed}
+          onChange={handleInputChange}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+        >
+          <option value="fast">Быстро</option>
+          <option value="medium">Средняя</option>
+          <option value="slow">Медленно</option>
+        </select>
+      </div>
       {/* Submit Button */}
       <button
         type="submit"

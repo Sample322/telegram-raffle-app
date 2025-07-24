@@ -268,6 +268,7 @@ function LiveRafflePage() {
                   currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
                   socket={socket}
                   raffleId={id}
+                  spinSpeed={raffle.wheel_speed || 'fast'}
                   onComplete={(winner) => console.log('Winner selected:', winner)}
                 />
               ) : (
