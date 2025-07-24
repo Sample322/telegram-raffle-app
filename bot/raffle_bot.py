@@ -56,7 +56,7 @@ class RaffleStates(StatesGroup):
     waiting_prizes        = State()
     waiting_prize_details = State()
     waiting_end_datetime  = State()
-
+    waiting_wheel_speed   = State()
 # ────────────────────────────────
 # ИСПРАВЛЕННЫЙ класс APIClient
 # ────────────────────────────────
@@ -769,12 +769,12 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
                 f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')} (МСК)\n"
                 f"🏆 Призовых мест: {data['prizes_count']}\n\n"
                 "⏰ Результаты будут подведены автоматически!\n\n"
-                "Сейчас начнется рассылка уведомлений...",
+                "Уведомления отправлены всем подписчикам.",
                 reply_markup=keyboard
             )
             
-            # Отправляем уведомления
-            await send_raffle_notification(raffle['id'], data)
+            # НЕ отправляем уведомления здесь, так как backend уже это сделал!
+            # Удаляем вызов: await send_raffle_notification(raffle['id'], data)
             
         except Exception as e:
             await loading_msg.delete()
