@@ -11,7 +11,7 @@ class User(Base):
     username = Column(String)
     first_name = Column(String)
     last_name = Column(String)
-    notifications_enabled = Column(Boolean, default=False)
+    notifications_enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     participations = relationship("Participant", back_populates="user")
@@ -24,10 +24,8 @@ class Raffle(Base):
     title = Column(String)
     description = Column(Text)
     photo_url = Column(String)
-    photo_file_id = Column(String)
     channels = Column(JSON)  # List of channel usernames
     prizes = Column(JSON)  # {1: "iPhone 15", 2: "AirPods", 3: "Gift Card"}
-    wheel_speed = Column(String, default="fast")  # fast, medium, slow
     start_date = Column(DateTime(timezone=True), server_default=func.now())
     end_date = Column(DateTime(timezone=True))
     draw_delay_minutes = Column(Integer, default=5)  # Delay before wheel starts

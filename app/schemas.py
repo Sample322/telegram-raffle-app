@@ -23,12 +23,10 @@ class RaffleBase(BaseModel):
     title: str
     description: str
     photo_url: Optional[str]
-    photo_file_id: Optional[str]
     channels: List[str]
     prizes: Dict[int, str]
     end_date: datetime
     draw_delay_minutes: int = 5
-    wheel_speed: str = "fast"
 
 class RaffleCreate(RaffleBase):
     pass

@@ -63,13 +63,6 @@ async def create_raffle(
         user_ids,
         notification_data
     )
-
-    if raffle.channels:
-        await TelegramService.post_raffle_to_channels(
-            raffle.id,
-            raffle.channels,
-            notification_data
-        )
     
     return raffle
 
