@@ -56,7 +56,8 @@ class RaffleStates(StatesGroup):
     waiting_prizes        = State()
     waiting_prize_details = State()
     waiting_end_datetime  = State()
-    waiting_wheel_speed   = State()
+    waiting_speed        = State()
+
 # ────────────────────────────────
 # ИСПРАВЛЕННЫЙ класс APIClient
 # ────────────────────────────────
@@ -77,10 +78,12 @@ class APIClient:
                 "title":  raffle_data["title"],
                 "description": raffle_data["description"],
                 "photo_url": raffle_data.get("photo_url", ""),
+                "photo_file_id": raffle_data.get("photo_file_id"),
                 "channels": raffle_data["channels"].split() if raffle_data.get("channels") else [],
                 "prizes": raffle_data.get("prizes", {}),
                 "end_date": raffle_data["end_date"].isoformat(),
                 "draw_delay_minutes": 5,
+                "wheel_speed": raffle_data.get("wheel_speed", "fast"),
             }
 
             # 2. формируем initData администратора
@@ -214,6 +217,7 @@ class DatabaseManager:
                     start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     end_date TIMESTAMP,
                     winners_count INTEGER DEFAULT 1,
+                    wheel_speed TEXT DEFAULT 'fast',
                     is_active INTEGER DEFAULT 1,
                     is_completed INTEGER DEFAULT 0,
                     result_message TEXT
@@ -252,8 +256,12 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
+                INSERT INTO users (user_id, username, first_name, last_name)
                 VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username=excluded.username,
+                    first_name=excluded.first_name,
+                    last_name=excluded.last_name
             ''', (user_id, username, first_name, last_name))
             conn.commit()
     
@@ -277,16 +285,17 @@ class DatabaseManager:
             cursor.execute('SELECT user_id FROM users WHERE notifications_enabled = 1')
             return [row[0] for row in cursor.fetchall()]
     
-    def create_raffle_cache(self, api_id: int, title: str, description: str, photo_file_id: str, 
-                          photo_url: str, channels: str, prizes: dict, end_date: datetime) -> int:
+    def create_raffle_cache(self, api_id: int, title: str, description: str, photo_file_id: str,
+                          photo_url: str, channels: str, prizes: dict, end_date: datetime,
+                          wheel_speed: str) -> int:
         """Создание локальной копии розыгрыша"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO raffles (api_id, title, description, photo_file_id, photo_url, channels, prizes, end_date, winners_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (api_id, title, description, photo_file_id, photo_url, channels, 
-                  json.dumps(prizes), end_date, len(prizes)))
+                INSERT INTO raffles (api_id, title, description, photo_file_id, photo_url, channels, prizes, end_date, winners_count, wheel_speed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (api_id, title, description, photo_file_id, photo_url, channels,
+                  json.dumps(prizes), end_date, len(prizes), wheel_speed))
             conn.commit()
             return cursor.lastrowid
     
@@ -734,57 +743,17 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
         if end_date <= moscow_now:
             await message.answer("❌ Дата должна быть в будущем! Попробуйте еще раз:")
             return
+        await state.update_data(end_date=end_date)
+        await state.set_state(RaffleStates.waiting_speed)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Быстро"), KeyboardButton(text="Средняя"), KeyboardButton(text="Медленно")]],
+            resize_keyboard=True
+        )
+        await message.answer(
+            "Шаг 7/7: Выберите скорость вращения колеса:",
+            reply_markup=kb
+        )
         
-        # Получаем все данные
-        data = await state.get_data()
-        # Сохраняем как есть - сервер должен интерпретировать это как московское время
-        data['end_date'] = end_date
-        
-        # Создаем розыгрыш через API
-        loading_msg = await message.answer("⏳ Создаю розыгрыш...")
-        
-        try:
-            # Пробуем создать через API
-            raffle = await api_client.create_raffle(data)
-            
-            # Сохраняем в локальный кеш
-            db.create_raffle_cache(
-                api_id=raffle['id'],
-                title=data['title'],
-                description=data['description'],
-                photo_file_id=data.get('photo_file_id'),
-                photo_url=data.get('photo_url', ''),
-                channels=data.get('channels', ''),
-                prizes=data['prizes'],
-                end_date=end_date
-            )
-            
-            await loading_msg.delete()
-            await state.clear()
-            
-            keyboard = create_admin_keyboard()
-            await message.answer(
-                "✅ Розыгрыш успешно создан!\n\n"
-                f"📋 Название: {data['title']}\n"
-                f"📅 Завершится: {end_date.strftime('%d.%m.%Y в %H:%M')} (МСК)\n"
-                f"🏆 Призовых мест: {data['prizes_count']}\n\n"
-                "⏰ Результаты будут подведены автоматически!\n\n"
-                "Уведомления отправлены всем подписчикам.",
-                reply_markup=keyboard
-            )
-            
-            # НЕ отправляем уведомления здесь, так как backend уже это сделал!
-            # Удаляем вызов: await send_raffle_notification(raffle['id'], data)
-            
-        except Exception as e:
-            await loading_msg.delete()
-            logger.error(f"Error creating raffle: {e}")
-            await message.answer(
-                f"❌ Ошибка при создании розыгрыша: {str(e)}\n\n"
-                "Попробуйте еще раз или обратитесь к разработчику.",
-                reply_markup=create_admin_keyboard()
-            )
-            await state.clear()
         
     except ValueError:
         await message.answer(
@@ -792,6 +761,51 @@ async def process_end_datetime(message: types.Message, state: FSMContext):
             "Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ\n"
             "Например: 25.12.2024 18:00"
         )
+
+@dp.message(RaffleStates.waiting_speed)
+async def process_speed(message: types.Message, state: FSMContext):
+    speed_map = {"Быстро": "fast", "Средняя": "medium", "Медленно": "slow"}
+    speed = speed_map.get(message.text)
+    if not speed:
+        await message.answer("Пожалуйста, выберите скорость из предложенных кнопок.")
+        return
+    data = await state.get_data()
+    data["wheel_speed"] = speed
+    loading_msg = await message.answer("⏳ Создаю розыгрыш...")
+    try:
+        raffle = await api_client.create_raffle(data)
+        db.create_raffle_cache(
+            api_id=raffle['id'],
+            title=data['title'],
+            description=data['description'],
+            photo_file_id=data.get('photo_file_id'),
+            photo_url=data.get('photo_url', ''),
+            channels=data.get('channels', ''),
+            prizes=data['prizes'],
+            end_date=data['end_date'],
+            wheel_speed=speed
+        )
+        await loading_msg.delete()
+        await state.clear()
+        keyboard = create_admin_keyboard()
+        await message.answer(
+            "✅ Розыгрыш успешно создан!\n\n"
+            f"📋 Название: {data['title']}\n"
+            f"📅 Завершится: {data['end_date'].strftime('%d.%m.%Y в %H:%M')} (МСК)\n"
+            f"🏆 Призовых мест: {data['prizes_count']}\n\n"
+            "⏰ Результаты будут подведены автоматически!\n\n"
+            "Сейчас начнется рассылка уведомлений...",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        await loading_msg.delete()
+        logger.error(f"Error creating raffle: {e}")
+        await message.answer(
+            f"❌ Ошибка при создании розыгрыша: {str(e)}\n\n"
+            "Попробуйте еще раз или обратитесь к разработчику.",
+            reply_markup=create_admin_keyboard()
+        )
+        await state.clear()
 
 async def send_raffle_notification(raffle_id: int, raffle_data: dict):
     """Отправка уведомлений о новом розыгрыше"""
