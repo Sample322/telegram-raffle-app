@@ -27,6 +27,8 @@ class RaffleBase(BaseModel):
     prizes: Dict[int, str]
     end_date: datetime
     draw_delay_minutes: int = 5
+    wheel_speed: str = "fast"  # НОВОЕ ПОЛЕ
+    post_channels: List[str] = []  # НОВОЕ ПОЛЕ
 
 class RaffleCreate(RaffleBase):
     pass

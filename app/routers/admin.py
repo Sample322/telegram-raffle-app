@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 import aiohttp
 from ..database import get_db
-from ..models import Raffle, User, Admin, Winner, Participant  # Добавлены Winner и Participant!
+from ..models import Raffle, User, Admin, Winner, Participant
 from ..schemas import RaffleCreate, Raffle as RaffleSchema
 from ..services.telegram import TelegramService
 from ..utils.auth import get_current_admin
@@ -18,6 +18,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BACKEND_URL = os.getenv("API_URL", "http://localhost:8000")
 
 @router.post("/raffles", response_model=RaffleSchema)
 async def create_raffle(
@@ -41,30 +42,96 @@ async def create_raffle(
     utc_time = convert_to_utc(moscow_time)
     raffle_dict['end_date'] = utc_time
     
+    # Исправляем URL изображения если оно есть
+    if raffle_dict.get('photo_url') and not raffle_dict['photo_url'].startswith('http'):
+        raffle_dict['photo_url'] = f"{BACKEND_URL}{raffle_dict['photo_url']}"
+    
     raffle = Raffle(**raffle_dict)
     db.add(raffle)
     await db.commit()
     await db.refresh(raffle)
     
-    # Notify users with notifications enabled
+    # Постинг в каналы для публикации
+    if raffle_data.post_channels:
+        await post_to_channels(raffle, raffle_data.post_channels)
+    
+    # Notify ONLY users with notifications enabled (убираем дублирование)
     users_result = await db.execute(
         select(User).where(User.notifications_enabled == True)
     )
     users = users_result.scalars().all()
-    user_ids = [user.telegram_id for user in users]
     
-    # For notifications, format the date back to Moscow time
-    notification_data = raffle_data.dict()
-    notification_data['end_date'] = moscow_time.strftime('%d.%m.%Y в %H:%M МСК')
-    
-    # Send notifications
-    await TelegramService.notify_new_raffle(
-        raffle.id,
-        user_ids,
-        notification_data
-    )
+    if users:  # Отправляем только если есть подписанные пользователи
+        user_ids = [user.telegram_id for user in users]
+        
+        # For notifications, format the date back to Moscow time
+        notification_data = raffle_data.dict()
+        notification_data['end_date'] = moscow_time.strftime('%d.%m.%Y в %H:%M МСК')
+        notification_data['id'] = raffle.id
+        
+        # Send notifications
+        await TelegramService.notify_new_raffle(
+            raffle.id,
+            user_ids,
+            notification_data
+        )
     
     return raffle
+
+async def post_to_channels(raffle: Raffle, channels: List[str]):
+    """Публикация розыгрыша в указанные каналы"""
+    # Форматируем призы
+    prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle.prizes.items()])
+    
+    # Форматируем дату для отображения
+    from ..config import convert_from_utc
+    moscow_time = convert_from_utc(raffle.end_date)
+    
+    text = (
+        f"🎉 **Новый розыгрыш!**\n\n"
+        f"**{raffle.title}**\n\n"
+        f"{raffle.description}\n\n"
+        f"🏆 **Призы:**\n{prizes_text}\n\n"
+        f"⏰ До {moscow_time.strftime('%d.%m.%Y в %H:%M МСК')}"
+    )
+    
+    # Кнопка для участия
+    keyboard = {
+        "inline_keyboard": [[{
+            "text": "🎯 Участвовать",
+            "url": f"https://t.me/{os.getenv('TELEGRAM_BOT_USERNAME')}?start=raffle_{raffle.id}"
+        }]]
+    }
+    
+    for channel in channels:
+        channel = channel.replace('@', '')
+        try:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/"
+            data = {
+                "chat_id": f"@{channel}",
+                "parse_mode": "Markdown"
+            }
+            
+            if raffle.photo_url:
+                # Отправляем с фото
+                data["photo"] = raffle.photo_url
+                data["caption"] = text
+                method = "sendPhoto"
+            else:
+                # Отправляем текст
+                data["text"] = text
+                method = "sendMessage"
+            
+            data["reply_markup"] = keyboard
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url + method, json=data) as response:
+                    result = await response.json()
+                    if not result.get("ok"):
+                        print(f"Failed to post to @{channel}: {result}")
+                        
+        except Exception as e:
+            print(f"Error posting to channel @{channel}: {e}")
 
 @router.post("/upload-image")
 async def upload_image(
@@ -86,8 +153,11 @@ async def upload_image(
         content = await file.read()
         f.write(content)
     
-    # Return URL
-    return {"url": f"/uploads/{file_name}"}
+    # Return FULL URL
+    backend_url = BACKEND_URL
+    return {"url": f"{backend_url}/uploads/{file_name}"}
+
+# ... остальные методы без изменений ...
 
 @router.post("/upload-telegram-photo")
 async def upload_telegram_photo(
