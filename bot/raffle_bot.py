@@ -774,17 +774,8 @@ async def process_speed(message: types.Message, state: FSMContext):
     loading_msg = await message.answer("⏳ Создаю розыгрыш...")
     try:
         raffle = await api_client.create_raffle(data)
-        db.create_raffle_cache(
-            api_id=raffle['id'],
-            title=data['title'],
-            description=data['description'],
-            photo_file_id=data.get('photo_file_id'),
-            photo_url=data.get('photo_url', ''),
-            channels=data.get('channels', ''),
-            prizes=data['prizes'],
-            end_date=data['end_date'],
-            wheel_speed=speed
-        )
+        # НЕ вызываем send_raffle_notification - backend сам отправит
+        
         await loading_msg.delete()
         await state.clear()
         keyboard = create_admin_keyboard()
@@ -792,9 +783,9 @@ async def process_speed(message: types.Message, state: FSMContext):
             "✅ Розыгрыш успешно создан!\n\n"
             f"📋 Название: {data['title']}\n"
             f"📅 Завершится: {data['end_date'].strftime('%d.%m.%Y в %H:%M')} (МСК)\n"
-            f"🏆 Призовых мест: {data['prizes_count']}\n\n"
-            "⏰ Результаты будут подведены автоматически!\n\n"
-            "Сейчас начнется рассылка уведомлений...",
+            f"🏆 Призовых мест: {data['prizes_count']}\n"
+            f"⚡ Скорость колеса: {message.text}\n\n"
+            "⏰ Результаты будут подведены автоматически!",
             reply_markup=keyboard
         )
     except Exception as e:
@@ -806,63 +797,6 @@ async def process_speed(message: types.Message, state: FSMContext):
             reply_markup=create_admin_keyboard()
         )
         await state.clear()
-
-async def send_raffle_notification(raffle_id: int, raffle_data: dict):
-    """Отправка уведомлений о новом розыгрыше"""
-    users = db.get_users_with_notifications()
-    
-    # Кнопка с Web App для участия
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🎯 Участвовать",
-            web_app=types.WebAppInfo(url=f"{WEBAPP_URL}/raffle/{raffle_id}")
-        )]
-    ])
-    
-    # Форматируем призы
-    prizes_text = "\n".join([f"{pos}. {prize}" for pos, prize in raffle_data['prizes'].items()])
-    
-    caption = (
-        f"🎉 **Новый розыгрыш!**\n\n"
-        f"**{raffle_data['title']}**\n\n"
-        f"{raffle_data['description']}\n\n"
-        f"🏆 **Призы:**\n{prizes_text}\n\n"
-        f"⏰ До {raffle_data['end_date'].strftime('%d.%m.%Y в %H:%M')}"
-    )
-    
-    success_count = 0
-    for user_id in users:
-        try:
-            if raffle_data.get('photo_file_id'):
-                await bot.send_photo(
-                    chat_id=user_id,
-                    photo=raffle_data['photo_file_id'],
-                    caption=caption,
-                    reply_markup=keyboard,
-                    parse_mode="Markdown"
-                )
-            else:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=caption,
-                    reply_markup=keyboard,
-                    parse_mode="Markdown"
-                )
-            success_count += 1
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
-    
-    # Уведомляем админов о результатах рассылки
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                f"✅ Рассылка завершена!\n"
-                f"Отправлено: {success_count} из {len(users)} уведомлений"
-            )
-        except:
-            pass
 
 async def notify_raffle_live(raffle_id: int):
     """Уведомление о начале live розыгрыша"""
