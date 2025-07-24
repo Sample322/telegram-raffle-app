@@ -36,7 +36,7 @@ app = FastAPI(lifespan=lifespan, title="Telegram Raffle API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://sample322-telegram-raffle-app-faa0.twc1.net",  # Ваш frontend
+        "https://sample322-telegram-raffle-app-7603.twc1.net",  # Ваш frontend
         "https://*.twc1.net",  # Все Timeweb домены
         "http://localhost:3000",
         "http://localhost:3001"
