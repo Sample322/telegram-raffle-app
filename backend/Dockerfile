@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install aiosqlite  # Убедимся что установлен
 
 # Copy project
 COPY . .
@@ -24,6 +25,8 @@ COPY . .
 # Create uploads directory
 RUN mkdir -p uploads
 
-# Run the application
+# Expose port
 EXPOSE 8000
+
+# Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
