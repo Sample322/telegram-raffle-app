@@ -124,7 +124,7 @@ class TelegramService:
             return False
     
     @staticmethod
-    async def send_notification(user_id: int, text: str, photo: Optional[str] = None, 
+    async def send_notification(user_id: str | int, text: str, photo: Optional[str] = None, 
                               keyboard: Optional[dict] = None):
         """Send notification to user"""
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/"
@@ -201,15 +201,45 @@ class TelegramService:
             f"🏆 **Призы:**\n{prizes_text}\n\n"
             f"⏰ До {raffle_data['end_date']}"
         )
-        
+        photo = raffle_data.get('photo_file_id') or raffle_data.get('photo_url')
         for user_id in users:
             await TelegramService.send_notification(
                 user_id,
                 text,
-                raffle_data.get('photo_url'),
+                photo,
                 keyboard
             )
             await asyncio.sleep(0.05)  # Rate limiting
+
+    @staticmethod
+    async def post_raffle_to_channels(raffle_id: int, channels: List[str], raffle_data: dict):
+        """Post raffle announcement to specified channels"""
+        keyboard = {
+            "inline_keyboard": [[{
+                "text": "🎯 Участвовать",
+                "web_app": {"url": f"{WEBAPP_URL}/raffle/{raffle_id}"}
+            }]]
+        }
+
+        prizes_text = "\n".join([f"{i}. {prize}" for i, prize in raffle_data['prizes'].items()])
+
+        text = (
+            f"🎉 **Новый розыгрыш!**\n\n"
+            f"**{raffle_data['title']}**\n\n"
+            f"{raffle_data['description']}\n\n"
+            f"🏆 **Призы:**\n{prizes_text}\n\n"
+            f"⏰ До {raffle_data['end_date']}"
+        )
+
+        photo = raffle_data.get('photo_file_id') or raffle_data.get('photo_url')
+        for channel in channels:
+            await TelegramService.send_notification(
+                f"@{channel.lstrip('@')}",
+                text,
+                photo,
+                keyboard
+            )
+            await asyncio.sleep(0.05)
     
     @staticmethod
     async def notify_raffle_complete(raffle_id: int, users: List[int], raffle_data: dict, winners: List[dict]):

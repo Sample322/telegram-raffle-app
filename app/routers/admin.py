@@ -63,6 +63,13 @@ async def create_raffle(
         user_ids,
         notification_data
     )
+
+    if raffle.channels:
+        await TelegramService.post_raffle_to_channels(
+            raffle.id,
+            raffle.channels,
+            notification_data
+        )
     
     return raffle
 
@@ -87,7 +94,7 @@ async def upload_image(
         f.write(content)
     
     # Return URL
-    return {"url": f"/uploads/{file_name}"}
+    return {"url": f"/uploads/{file_name}"}}
 
 @router.post("/upload-telegram-photo")
 async def upload_telegram_photo(

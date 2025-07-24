@@ -44,7 +44,8 @@ async def get_current_user(
                 telegram_id=telegram_id,
                 username=user_data.get("username"),
                 first_name=user_data.get("first_name", ""),
-                last_name=user_data.get("last_name", "")
+                last_name=user_data.get("last_name", ""),
+                notifications_enabled=False
             )
             db.add(user)
             await db.commit()
