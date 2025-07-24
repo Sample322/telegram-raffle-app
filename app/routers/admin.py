@@ -94,7 +94,7 @@ async def upload_image(
         f.write(content)
     
     # Return URL
-    return {"url": f"/uploads/{file_name}"}}
+    return {"url": f"/uploads/{file_name}"}
 
 @router.post("/upload-telegram-photo")
 async def upload_telegram_photo(
