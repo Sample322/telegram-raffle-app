@@ -6,7 +6,11 @@ ENV PYTHONUNBUFFERED=1
 
 # Set work directory
 WORKDIR /app
+# Create uploads directory and set permissions
+RUN mkdir -p /app/uploads && chmod 755 /app/uploads
 
+# Add volume for uploads
+VOLUME ["/app/uploads"]
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \

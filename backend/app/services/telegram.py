@@ -161,7 +161,7 @@ class TelegramService:
         """Notify users about raffle start"""
         keyboard = {
             "inline_keyboard": [[{
-                "text": "🎯 Открыть розыгрыш",
+                "text": "🎰 Смотреть розыгрыш",
                 "web_app": {"url": f"{WEBAPP_URL}/raffle/{raffle_id}/live"}
             }]]
         }
@@ -172,6 +172,7 @@ class TelegramService:
             f"Нажмите кнопку ниже, чтобы посмотреть live-розыгрыш!"
         )
         
+        # Используем существующий метод send_notification
         for user_id in users:
             await TelegramService.send_notification(
                 user_id, 
@@ -180,7 +181,6 @@ class TelegramService:
                 keyboard
             )
             await asyncio.sleep(0.05)  # Rate limiting
-    
     @staticmethod
     async def notify_new_raffle(raffle_id: int, users: List[int], raffle_data: dict):
         """Notify users about new raffle"""
@@ -202,6 +202,7 @@ class TelegramService:
             f"⏰ До {raffle_data['end_date']}"
         )
         
+        # ВАЖНО: Используем существующий метод send_notification
         for user_id in users:
             await TelegramService.send_notification(
                 user_id,
