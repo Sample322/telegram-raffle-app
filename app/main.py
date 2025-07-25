@@ -39,7 +39,8 @@ app.add_middleware(
         "https://sample322-telegram-raffle-app-7603.twc1.net",  # Ваш frontend
         "https://*.twc1.net",  # Все Timeweb домены
         "http://localhost:3000",
-        "http://localhost:3001"
+        "http://localhost:3001",
+        "*" 
     ],
     allow_credentials=True,
     allow_methods=["*"],
