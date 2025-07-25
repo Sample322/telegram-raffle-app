@@ -269,14 +269,28 @@ class DatabaseManager:
         """Переключение уведомлений для пользователя"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            # Сначала проверяем, есть ли пользователь в базе
             cursor.execute('SELECT notifications_enabled FROM users WHERE user_id = ?', (user_id,))
             result = cursor.fetchone()
             
-            new_status = 0 if result and result[0] else 1
-            cursor.execute('UPDATE users SET notifications_enabled = ? WHERE user_id = ?', (new_status, user_id))
-            conn.commit()
-            
-            return bool(new_status)
+            if result is None:
+                # Пользователя нет в базе, добавляем с включенными уведомлениями
+                cursor.execute('''
+                    INSERT INTO users (user_id, notifications_enabled) 
+                    VALUES (?, 1)
+                ''', (user_id,))
+                conn.commit()
+                return True
+            else:
+                # Переключаем статус
+                current_status = result[0]
+                new_status = 0 if current_status == 1 else 1
+                cursor.execute(
+                    'UPDATE users SET notifications_enabled = ? WHERE user_id = ?', 
+                    (new_status, user_id)
+                )
+                conn.commit()
+                return bool(new_status)
     
     def get_users_with_notifications(self) -> List[int]:
         """Получение списка пользователей с включенными уведомлениями"""
