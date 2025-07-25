@@ -5,7 +5,7 @@ import api from '../services/api';
 import RaffleCard from '../components/RaffleCard';
 import CompletedRaffleCard from '../components/CompletedRaffleCard';
 import { useAuth } from '../contexts/AuthContext';
-import PageBackground from '../components/PageBackground';
+
 function HomePage() {
   const [activeRaffles, setActiveRaffles] = useState([]);
   const [completedRaffles, setCompletedRaffles] = useState([]);
@@ -49,8 +49,7 @@ function HomePage() {
   }
 
   return (
-  <PageBackground page="home">
-      <div className="container mx-auto px-4 py-6">
+    <div className="container mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">🎉 Розыгрыши</h1>
         
@@ -98,7 +97,6 @@ function HomePage() {
         )}
       </div>
     </div>
-    </PageBackground>
   );
 }
 

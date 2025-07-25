@@ -4,7 +4,6 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import WheelComponent from '../components/WheelComponent';
 import { toast } from 'react-hot-toast';
-import PageBackground from '../components/PageBackground';
 
 function LiveRafflePage() {
   const { id } = useParams();
@@ -219,8 +218,7 @@ function LiveRafflePage() {
 
 
   return (
-    <PageBackground page="live">
-+    <div className="min-h-screen text-white">
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
       {/* Navigation Header */}
       <div className="sticky top-0 z-50 bg-white/10 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
@@ -374,7 +372,6 @@ function LiveRafflePage() {
         )}
       </div>
     </div>
-    </PageBackground>
   );
 }
 

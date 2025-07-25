@@ -92,62 +92,62 @@ class NotificationService:
             
             logger.info(f"Sent raffle start notifications to {len(all_user_ids)} users")
 
-@staticmethod
-async def notify_channels_raffle_start(raffle_id: int, title: str, photo_url: str, channels: List[str]):
-    """Уведомление каналов о начале розыгрыша"""
-    import os
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
-    WEBAPP_URL = os.getenv("WEBAPP_URL")
-    
-    text = (
-        f"🎰 **Розыгрыш начался!**\n\n"
-        f"**{title}**\n\n"
-        f"Прямо сейчас определяются победители!\n"
-        f"Смотрите live-трансляцию розыгрыша!"
-    )
-    
-    keyboard = {
-        "inline_keyboard": [[{
-            "text": "🎰 Смотреть розыгрыш",
-            "url": f"{WEBAPP_URL}/raffle/{raffle_id}/live"
-        }]]
-    }
-    
-    import aiohttp
-    
-    for channel in channels:
-        channel = channel.replace('@', '')
-        try:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/"
-            
-            if photo_url and photo_url.startswith('http'):
-                data = {
-                    "chat_id": f"@{channel}",
-                    "photo": photo_url,
-                    "caption": text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": keyboard
-                }
-                method = "sendPhoto"
-            else:
-                data = {
-                    "chat_id": f"@{channel}",
-                    "text": text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": keyboard
-                }
-                method = "sendMessage"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url + method, json=data) as response:
-                    result = await response.json()
-                    if not result.get("ok"):
-                        logger.error(f"Failed to notify channel @{channel}: {result}")
-                    else:
-                        logger.info(f"Successfully notified channel @{channel} about raffle start")
-                        
-        except Exception as e:
-            logger.error(f"Error notifying channel @{channel}: {e}")
+    @staticmethod
+    async def notify_channels_raffle_start(raffle_id: int, title: str, photo_url: str, channels: List[str]):
+        """Уведомление каналов о начале розыгрыша"""
+        import os
+        BOT_TOKEN = os.getenv("BOT_TOKEN")
+        WEBAPP_URL = os.getenv("WEBAPP_URL")
+        
+        text = (
+            f"🎰 **Розыгрыш начался!**\n\n"
+            f"**{title}**\n\n"
+            f"Прямо сейчас определяются победители!\n"
+            f"Смотрите live-трансляцию розыгрыша!"
+        )
+        
+        keyboard = {
+            "inline_keyboard": [[{
+                "text": "🎰 Смотреть розыгрыш",
+                "url": f"{WEBAPP_URL}/raffle/{raffle_id}/live"
+            }]]
+        }
+        
+        import aiohttp
+        
+        for channel in channels:
+            channel = channel.replace('@', '')
+            try:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/"
+                
+                if photo_url and photo_url.startswith('http'):
+                    data = {
+                        "chat_id": f"@{channel}",
+                        "photo": photo_url,
+                        "caption": text,
+                        "parse_mode": "Markdown",
+                        "reply_markup": keyboard
+                    }
+                    method = "sendPhoto"
+                else:
+                    data = {
+                        "chat_id": f"@{channel}",
+                        "text": text,
+                        "parse_mode": "Markdown",
+                        "reply_markup": keyboard
+                    }
+                    method = "sendMessage"
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url + method, json=data) as response:
+                        result = await response.json()
+                        if not result.get("ok"):
+                            logger.error(f"Failed to notify channel @{channel}: {result}")
+                        else:
+                            logger.info(f"Successfully notified channel @{channel} about raffle start")
+                            
+            except Exception as e:
+                logger.error(f"Error notifying channel @{channel}: {e}")
     
     @staticmethod
     async def notify_winners(raffle_id: int, winners: List[Dict]):

@@ -183,34 +183,53 @@ class TelegramService:
             await asyncio.sleep(0.05)  # Rate limiting
     @staticmethod
     async def notify_new_raffle(raffle_id: int, users: List[int], raffle_data: dict):
-        """Notify users about new raffle"""
+        """Notify users about new raffle (личные сообщения)"""
+
+        from dateutil import parser           # локальные импорты, чтобы не менять шапку файла
+        import pytz
+
         keyboard = {
             "inline_keyboard": [[{
                 "text": "🎯 Участвовать",
                 "web_app": {"url": f"{WEBAPP_URL}/raffle/{raffle_id}"}
             }]]
         }
-        
-        # Format prizes
-        prizes_text = "\n".join([f"{i}. {prize}" for i, prize in raffle_data['prizes'].items()])
-        
+
+        # ---------- конвертация даты ----------
+        end_date_raw = raffle_data.get("end_date")
+        try:
+            # если пришла ISO‑строка в UTC → парсим и переводим в МСК
+            dt = parser.isoparse(end_date_raw)            # aware datetime
+            moscow_time = dt.astimezone(pytz.timezone("Europe/Moscow"))
+            end_date_str = moscow_time.strftime("%d.%m.%Y %H:%M") + " МСК"
+        except Exception:
+            # если уже готовая строка (из админ‑панели) — используем как есть
+            end_date_str = end_date_raw
+        # --------------------------------------
+
+        # форматируем список призов
+        prizes_text = "\n".join(
+            [f"{i}. {prize}" for i, prize in raffle_data["prizes"].items()]
+        )
+
         text = (
-            f"🎉 **Новый розыгрыш!**\n\n"
+            "🎉 **Новый розыгрыш!**\n\n"
             f"**{raffle_data['title']}**\n\n"
             f"{raffle_data['description']}\n\n"
             f"🏆 **Призы:**\n{prizes_text}\n\n"
-            f"⏰ До {raffle_data['end_date']}"
+            f"⏰ До {end_date_str}"
         )
-        
-        # ВАЖНО: Используем существующий метод send_notification
+
+        # рассылаем подписчикам
         for user_id in users:
             await TelegramService.send_notification(
                 user_id,
                 text,
-                raffle_data.get('photo_url'),
-                keyboard
+                raffle_data.get("photo_url"),
+                keyboard,
             )
-            await asyncio.sleep(0.05)  # Rate limiting
+            await asyncio.sleep(0.05)  # лёгкий rate‑limit
+
     
     @staticmethod
     async def notify_raffle_complete(raffle_id: int, users: List[int], raffle_data: dict, winners: List[dict]):
