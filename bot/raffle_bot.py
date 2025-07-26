@@ -14,6 +14,7 @@ import time
 import hashlib
 import hmac
 import urllib.parse
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from aiogram import types, F
 from aiogram.fsm.context import FSMContext
 from aiogram import Bot, Dispatcher, types, F
@@ -893,12 +894,18 @@ async def process_speed(message: types.Message, state: FSMContext):
     if not speed:
         await message.answer("Пожалуйста, выберите скорость из предложенных кнопок.")
         return
+    
     data = await state.get_data()
     data["wheel_speed"] = speed
     loading_msg = await message.answer("⏳ Создаю розыгрыш...")
+    
+    # Создаем задачу в фоне
+    asyncio.create_task(create_raffle_background(message, state, data, loading_msg))
+
+async def create_raffle_background(message: types.Message, state: FSMContext, data: dict, loading_msg):
+    """Фоновое создание розыгрыша"""
     try:
         raffle = await api_client.create_raffle(data)
-        # НЕ вызываем send_raffle_notification - backend сам отправит
         
         await loading_msg.delete()
         await state.clear()
