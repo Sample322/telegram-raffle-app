@@ -270,10 +270,13 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
                     "winners": winners
                 }, raffle_id)
                 
-                # Send notifications
-                await NotificationService.notify_winners(raffle_id, winners)
-                
-                logger.info(f"Raffle {raffle_id} completed successfully")
+                            # Send notifications to winners
+            await NotificationService.notify_winners(raffle_id, winners)
+
+            # Send notifications about results to all users and channels
+            await NotificationService.notify_raffle_results(raffle_id, winners)
+
+            logger.info(f"Raffle {raffle_id} completed successfully")
                 
     except Exception as e:
         logger.error(f"Error handling winner selection: {e}")
