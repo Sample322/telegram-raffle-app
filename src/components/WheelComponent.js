@@ -26,8 +26,18 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   useEffect(() => {
     if (isSpinning && participants.length > 0) {
       hasNotifiedRef.current = false; // Сброс флага
+      velocityRef.current = 0; // Сброс скорости
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current); // Отмена предыдущей анимации
+      }
       startSpin();
     }
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
   }, [isSpinning, participants]);
 
   const getCurrentSegmentIndex = () => {
@@ -184,29 +194,39 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     if (velocityRef.current > 0.001) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
-      // Колесо остановилось
-      if (!hasNotifiedRef.current) {
+      // Колесо полностью остановилось
+      velocityRef.current = 0; // Обнуляем скорость
+      
+      if (!hasNotifiedRef.current && participants.length > 0) {
         hasNotifiedRef.current = true;
         
-        const winnerIndex = getCurrentSegmentIndex();
-        const winner = participants[winnerIndex];
+        // Финальное обновление для точного позиционирования
+        drawWheel();
+        updateCurrentParticipant();
         
-        console.log('Wheel stopped. Winner:', winner);
-        
-        if (winner && socket && socket.readyState === WebSocket.OPEN && currentPrize) {
-          // Отправляем результат на сервер
-          const message = {
-            type: 'winner_selected',
-            winner: winner,
-            position: currentPrize.position,
-            prize: currentPrize.prize
-          };
-          console.log('Sending winner to server:', message);
-          socket.send(JSON.stringify(message));
-        }
-        
-        // Вызываем callback
-        onComplete && onComplete(winner);
+        // Небольшая задержка для визуального эффекта
+        setTimeout(() => {
+          const winnerIndex = getCurrentSegmentIndex();
+          const winner = participants[winnerIndex];
+          
+          console.log('Wheel stopped completely. Winner:', winner);
+          
+          if (winner && socket && socket.readyState === WebSocket.OPEN && currentPrize) {
+            // Отправляем результат на сервер только один раз
+            const message = {
+              type: 'winner_selected',
+              winner: winner,
+              position: currentPrize.position,
+              prize: currentPrize.prize,
+              timestamp: Date.now() // Добавляем временную метку
+            };
+            console.log('Sending winner to server:', message);
+            socket.send(JSON.stringify(message));
+          }
+          
+          // Вызываем callback
+          onComplete && onComplete(winner);
+        }, 500); // 500ms задержка после полной остановки
       }
     }
   };
