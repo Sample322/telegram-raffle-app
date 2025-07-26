@@ -99,7 +99,7 @@ function LiveRafflePage() {
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
           break;
-          
+         
         case 'winner_confirmed':
           setWinners(prev => {
             const updated = [...prev];
@@ -114,7 +114,13 @@ function LiveRafflePage() {
           setIsSpinning(false);
           toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
           break;
-          
+                    // В switch statement для ws.onmessage добавить:
+          case 'round_complete':
+            console.log(`Round ${data.position} completed`);
+            // Сбрасываем текущий раунд для следующего
+            setCurrentRound(null);
+            setIsSpinning(false);
+            break;
         case 'raffle_complete':
           setWinners(data.winners);
           setConnectionStatus('completed');

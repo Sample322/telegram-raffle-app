@@ -1,5 +1,3 @@
-import React, { useEffect, useRef, useState } from 'react';
-
 const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, wheelSpeed = 'fast' }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
@@ -9,6 +7,19 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const hasNotifiedRef = useRef(false);
   const [error, setError] = useState(false);
   const lastNotificationTimeRef = useRef(0);
+  const currentPrizeRef = useRef(null); // НОВОЕ: отслеживаем текущий приз
+  
+  // НОВОЕ: Сброс состояния при смене приза
+  useEffect(() => {
+    if (currentPrize && currentPrize !== currentPrizeRef.current) {
+      currentPrizeRef.current = currentPrize;
+      hasNotifiedRef.current = false;
+      lastNotificationTimeRef.current = 0;
+      setError(false);
+      console.log('Reset notification state for new prize:', currentPrize);
+    }
+  }, [currentPrize]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -20,46 +31,58 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     canvas.height = 500;
     
     drawWheel();
-    // Set initial participant
     updateCurrentParticipant();
   }, [participants]);
 
   useEffect(() => {
-    setError(false);
-  if (isSpinning && participants.length > 0 && !error) {
-    hasNotifiedRef.current = false;
-    velocityRef.current = 0;
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
+    if (isSpinning && participants.length > 0 && !error) {
+      // Сбрасываем флаг при новом вращении
+      hasNotifiedRef.current = false;
+      velocityRef.current = 0;
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+      startSpin();
+    } else if (!isSpinning) {
+      // Сбрасываем состояние когда колесо остановлено
+      velocityRef.current = 0;
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
     }
-    startSpin();
-  } else if (error) {
-    // Останавливаем анимацию при ошибке
-    velocityRef.current = 0;
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-      animationRef.current = null;
-    }
-  }
-  
-  return () => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-  };
-}, [currentPrize], [isSpinning, participants, error])
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isSpinning, participants, error, currentPrize]); // Добавляем currentPrize в зависимости
 
   const getCurrentSegmentIndex = () => {
     if (participants.length === 0) return -1;
 
-    // угол колеса в диапазоне [0‥2π)
+    // Нормализуем угол колеса в диапазоне [0, 2π)
     const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-    // «угол, куда смотрит стрелка»  =  3π/2  −  угол колеса
+    // Стрелка находится сверху (3π/2 или 270°)
+    // Вычисляем, на какой сегмент она указывает
     const pointerAngle = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
 
     const segmentAngle = (2 * Math.PI) / participants.length;
-    return Math.floor(pointerAngle / segmentAngle);
+    const index = Math.floor(pointerAngle / segmentAngle);
+    
+    // Логирование для отладки
+    console.log('Angle calculation:', {
+      rawAngle: angleRef.current,
+      normalized,
+      pointerAngle,
+      segmentAngle,
+      calculatedIndex: index,
+      participant: participants[index]
+    });
+    
+    return index;
   };
 
   const updateCurrentParticipant = () => {
@@ -188,11 +211,12 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
 
   const animate = () => {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-    logger.error('WebSocket disconnected during animation');
-    setError(true);
-    velocityRef.current = 0;
-    return;
-  }
+      console.error('WebSocket disconnected during animation');
+      setError(true);
+      velocityRef.current = 0;
+      return;
+    }
+    
     velocityRef.current *= velocityRef.friction || 0.985;
     angleRef.current += velocityRef.current;
     
@@ -202,36 +226,53 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
     if (velocityRef.current > 0.001) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
+      // Колесо остановилось
       velocityRef.current = 0;
+      animationRef.current = null;
       
-      if (!hasNotifiedRef.current && participants.length > 0) {
+      if (!hasNotifiedRef.current && participants.length > 0 && currentPrize) {
         hasNotifiedRef.current = true;
         
+        // Финальное обновление для точности
         drawWheel();
         updateCurrentParticipant();
         
+        // Отправляем результат с задержкой для стабилизации
         setTimeout(() => {
           const winnerIndex = getCurrentSegmentIndex();
+          if (winnerIndex < 0 || winnerIndex >= participants.length) {
+            console.error('Invalid winner index:', winnerIndex);
+            return;
+          }
+          
           const winner = participants[winnerIndex];
           
           // Защита от множественных отправок
           const now = Date.now();
-          if (now - lastNotificationTimeRef.current < 1000) {
-            console.log('Skipping duplicate notification');
+          const timeSinceLastNotification = now - lastNotificationTimeRef.current;
+          
+          if (timeSinceLastNotification < 2000) { // 2 секунды минимум между отправками
+            console.log('Skipping duplicate notification, time since last:', timeSinceLastNotification);
             return;
           }
+          
+          // Дополнительная проверка на текущий приз
+          if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
+            console.log('Prize mismatch, skipping notification');
+            return;
+          }
+          
           lastNotificationTimeRef.current = now;
           
-          console.log('Wheel stopped. Winner:', winner);
+          console.log('Wheel stopped. Winner:', winner, 'Prize:', currentPrize);
           
-          if (winner && socket && socket.readyState === WebSocket.OPEN && currentPrize) {
+          if (winner && socket && socket.readyState === WebSocket.OPEN) {
             const message = {
               type: 'winner_selected',
               winner: winner,
               position: currentPrize.position,
               prize: currentPrize.prize,
               timestamp: now,
-              // Добавляем уникальный ID для дедупликации на сервере
               messageId: `${raffleId}_${currentPrize.position}_${now}`
             };
             console.log('Sending winner to server:', message);
