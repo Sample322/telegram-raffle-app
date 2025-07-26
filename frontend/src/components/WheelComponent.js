@@ -7,7 +7,8 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const animationRef = useRef(null);
   const [currentParticipant, setCurrentParticipant] = useState(null);
   const hasNotifiedRef = useRef(false);
-  
+  const [error, setError] = useState(false);
+  const lastNotificationTimeRef = useRef(0);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -24,21 +25,29 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   }, [participants]);
 
   useEffect(() => {
-    if (isSpinning && participants.length > 0) {
-      hasNotifiedRef.current = false; // Сброс флага
-      velocityRef.current = 0; // Сброс скорости
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current); // Отмена предыдущей анимации
-      }
-      startSpin();
+    setError(false);
+  if (isSpinning && participants.length > 0 && !error) {
+    hasNotifiedRef.current = false;
+    velocityRef.current = 0;
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
     }
-    
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isSpinning, participants]);
+    startSpin();
+  } else if (error) {
+    // Останавливаем анимацию при ошибке
+    velocityRef.current = 0;
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+  }
+  
+  return () => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+  };
+}, [currentPrize], [isSpinning, participants, error])
 
   const getCurrentSegmentIndex = () => {
     if (participants.length === 0) return -1;
@@ -178,55 +187,59 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   };
 
   const animate = () => {
-    // Естественное замедление с учетом настроек скорости
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    logger.error('WebSocket disconnected during animation');
+    setError(true);
+    velocityRef.current = 0;
+    return;
+  }
     velocityRef.current *= velocityRef.friction || 0.985;
-    
-    // Вращаем колесо
     angleRef.current += velocityRef.current;
     
-    // Рисуем
     drawWheel();
-    
-    // Обновляем текущего участника
     updateCurrentParticipant();
 
-    // Продолжаем анимацию пока скорость достаточна
     if (velocityRef.current > 0.001) {
       animationRef.current = requestAnimationFrame(animate);
     } else {
-      // Колесо полностью остановилось
-      velocityRef.current = 0; // Обнуляем скорость
+      velocityRef.current = 0;
       
       if (!hasNotifiedRef.current && participants.length > 0) {
         hasNotifiedRef.current = true;
         
-        // Финальное обновление для точного позиционирования
         drawWheel();
         updateCurrentParticipant();
         
-        // Небольшая задержка для визуального эффекта
         setTimeout(() => {
           const winnerIndex = getCurrentSegmentIndex();
           const winner = participants[winnerIndex];
           
-          console.log('Wheel stopped completely. Winner:', winner);
+          // Защита от множественных отправок
+          const now = Date.now();
+          if (now - lastNotificationTimeRef.current < 1000) {
+            console.log('Skipping duplicate notification');
+            return;
+          }
+          lastNotificationTimeRef.current = now;
+          
+          console.log('Wheel stopped. Winner:', winner);
           
           if (winner && socket && socket.readyState === WebSocket.OPEN && currentPrize) {
-            // Отправляем результат на сервер только один раз
             const message = {
               type: 'winner_selected',
               winner: winner,
               position: currentPrize.position,
               prize: currentPrize.prize,
-              timestamp: Date.now() // Добавляем временную метку
+              timestamp: now,
+              // Добавляем уникальный ID для дедупликации на сервере
+              messageId: `${raffleId}_${currentPrize.position}_${now}`
             };
             console.log('Sending winner to server:', message);
             socket.send(JSON.stringify(message));
           }
           
-          // Вызываем callback
           onComplete && onComplete(winner);
-        }, 500); // 500ms задержка после полной остановки
+        }, 500);
       }
     }
   };
