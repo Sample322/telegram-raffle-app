@@ -184,10 +184,6 @@ class TelegramService:
     @staticmethod
     async def notify_new_raffle(raffle_id: int, users: List[int], raffle_data: dict):
         """Notify users about new raffle (личные сообщения)"""
-
-        from dateutil import parser           # локальные импорты, чтобы не менять шапку файла
-        import pytz
-
         keyboard = {
             "inline_keyboard": [[{
                 "text": "🎯 Участвовать",
@@ -195,17 +191,8 @@ class TelegramService:
             }]]
         }
 
-        # ---------- конвертация даты ----------
-        end_date_raw = raffle_data.get("end_date")
-        try:
-            # если пришла ISO‑строка в UTC → парсим и переводим в МСК
-            dt = parser.isoparse(end_date_raw)            # aware datetime
-            moscow_time = dt.astimezone(pytz.timezone("Europe/Moscow"))
-            end_date_str = moscow_time.strftime("%d.%m.%Y %H:%M") + " МСК"
-        except Exception:
-            # если уже готовая строка (из админ‑панели) — используем как есть
-            end_date_str = end_date_raw
-        # --------------------------------------
+        # Дата уже приходит отформатированной из админ-панели
+        end_date_str = raffle_data.get("end_date", "")
 
         # форматируем список призов
         prizes_text = "\n".join(
