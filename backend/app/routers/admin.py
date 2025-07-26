@@ -32,7 +32,23 @@ async def create_raffle(
     
     # Конвертируем дату из московского времени в UTC для хранения
     raffle_dict = raffle_data.dict()
+        # Исправляем URL изображения если оно есть
+    if raffle_dict.get('photo_url'):
+        # Если это относительный путь, добавляем базовый URL
+        if not raffle_dict['photo_url'].startswith('http'):
+            # Получаем правильный backend URL из переменных окружения
+            backend_url = os.getenv('BACKEND_URL', os.getenv('API_URL', 'http://localhost:8000'))
+            # Убираем /api если есть
+            backend_url = backend_url.replace('/api', '')
+            # Убираем trailing slash
+            backend_url = backend_url.rstrip('/')
+            # Добавляем слеш к пути если его нет
+            photo_path = raffle_dict['photo_url']
+            if not photo_path.startswith('/'):
+                photo_path = '/' + photo_path
+            raffle_dict['photo_url'] = f"{backend_url}{photo_path}"
     
+    logger.info(f"Photo URL after processing: {raffle_dict['photo_url']}")
     # Парсим дату как московское время и конвертируем в UTC
     end_date_str = raffle_dict['end_date']
     if isinstance(end_date_str, str):

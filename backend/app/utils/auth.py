@@ -40,15 +40,18 @@ async def get_current_user(
         user = result.scalar_one_or_none()
         
         if not user:
+    # Создаем нового пользователя
             user = User(
                 telegram_id=telegram_id,
                 username=user_data.get("username"),
                 first_name=user_data.get("first_name", ""),
-                last_name=user_data.get("last_name", "")
+                last_name=user_data.get("last_name", ""),
+                notifications_enabled=False  # По умолчанию выключены
             )
             db.add(user)
             await db.commit()
             await db.refresh(user)
+            logger.info(f"Auto-registered new user: {telegram_id}")
         else:
             # Update user info if changed
             update_needed = False
