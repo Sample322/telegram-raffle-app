@@ -7,6 +7,7 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const animationRef = useRef(null);
   const [currentParticipant, setCurrentParticipant] = useState(null);
   const hasNotifiedRef = useRef(false);
+  const [error, setError] = useState(false);
   const lastNotificationTimeRef = useRef(0);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -24,21 +25,29 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   }, [participants]);
 
   useEffect(() => {
-    if (isSpinning && participants.length > 0) {
-      hasNotifiedRef.current = false; // Сброс флага
-      velocityRef.current = 0; // Сброс скорости
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current); // Отмена предыдущей анимации
-      }
-      startSpin();
+    setError(false);
+  if (isSpinning && participants.length > 0 && !error) {
+    hasNotifiedRef.current = false;
+    velocityRef.current = 0;
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
     }
-    
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isSpinning, participants]);
+    startSpin();
+  } else if (error) {
+    // Останавливаем анимацию при ошибке
+    velocityRef.current = 0;
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+  }
+  
+  return () => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+  };
+}, [currentPrize], [isSpinning, participants, error])
 
   const getCurrentSegmentIndex = () => {
     if (participants.length === 0) return -1;
@@ -178,6 +187,12 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   };
 
   const animate = () => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    logger.error('WebSocket disconnected during animation');
+    setError(true);
+    velocityRef.current = 0;
+    return;
+  }
     velocityRef.current *= velocityRef.friction || 0.985;
     angleRef.current += velocityRef.current;
     
