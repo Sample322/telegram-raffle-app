@@ -69,7 +69,7 @@ async def create_raffle(
         select(User).where(User.notifications_enabled == True)
     )
     users = users_result.scalars().all()
-    
+
     if users:
         user_ids = [user.telegram_id for user in users]
         
