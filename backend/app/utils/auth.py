@@ -2,11 +2,12 @@ from fastapi import Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
+import logging
 
 from ..database import get_db
 from ..models import User, Admin
 from ..services.telegram import TelegramService
-
+logger = logging.getLogger(__name__)
 async def get_current_user(
     authorization: str = Header(...),
     db: AsyncSession = Depends(get_db)
