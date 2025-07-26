@@ -81,7 +81,7 @@ async def get_db():
         try:
             yield session
         except Exception as e:
-            logger.error(f"Database session error: {e}")
+            logger.exception("Database session error")  # Используем exception вместо error
             await session.rollback()
             raise
         finally:

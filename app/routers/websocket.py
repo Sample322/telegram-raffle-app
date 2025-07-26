@@ -21,6 +21,9 @@ raffle_states = {}
 
 class RaffleWheel:
     @staticmethod
+    # В backend/app/routers/websocket.py - замените метод run_wheel на этот:
+
+    @staticmethod
     async def run_wheel(raffle_id: int, db: AsyncSession):
         """Run the raffle wheel animation"""
         try:
@@ -109,10 +112,33 @@ class RaffleWheel:
                 
                 if waited >= timeout:
                     logger.error(f"Timeout waiting for wheel result for position {position}")
-                    await manager.broadcast({
-                        "type": "error",
-                        "message": "Превышено время ожидания результата"
-                    }, raffle_id)
+                    
+                    # ИСПРАВЛЕНИЕ: При таймауте выбираем случайного победителя
+                    if state['remaining_participants']:
+                        random_winner = random.choice(state['remaining_participants'])
+                        winner_data = {
+                            "id": random_winner.telegram_id,
+                            "username": random_winner.username,
+                            "first_name": random_winner.first_name,
+                            "last_name": random_winner.last_name
+                        }
+                        
+                        # Сохраняем победителя
+                        await handle_winner_selected(
+                            db, 
+                            raffle_id, 
+                            winner_data, 
+                            int(position), 
+                            raffle.prizes[position]
+                        )
+                        
+                        await manager.broadcast({
+                            "type": "winner_confirmed",
+                            "position": int(position),
+                            "winner": winner_data,
+                            "prize": raffle.prizes[position],
+                            "auto_selected": True  # Флаг что выбран автоматически
+                        }, raffle_id)
                 else:
                     # Даем время на анимацию победителя
                     await asyncio.sleep(3)
@@ -122,7 +148,7 @@ class RaffleWheel:
                 del raffle_states[raffle_id]
                 
         except Exception as e:
-            logger.error(f"Error running wheel for raffle {raffle_id}: {e}")
+            logger.exception(f"Error running wheel for raffle {raffle_id}")  # Используем exception для полного стека
             await manager.broadcast({
                 "type": "error",
                 "message": "Произошла ошибка при проведении розыгрыша"
@@ -131,145 +157,202 @@ class RaffleWheel:
             if raffle_id in raffle_states:
                 del raffle_states[raffle_id]
 
-@router.websocket("/{raffle_id}")
-async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
-    """WebSocket endpoint for live raffle"""
-    await manager.connect(websocket, raffle_id)
-    
-    try:
-        # Send current state to new connection
-        async with async_session_maker() as db:
-            raffle_result = await db.execute(
-                select(Raffle).where(Raffle.id == raffle_id)
-            )
-            raffle = raffle_result.scalar_one_or_none()
-            
-            if raffle:
-                await websocket.send_json({
-                    "type": "connection_established",
-                    "raffle": {
-                        "id": raffle.id,
-                        "title": raffle.title,
-                        "is_completed": raffle.is_completed,
-                        "draw_started": raffle.draw_started
-                    }
-                })
+    @router.websocket("/{raffle_id}")
+    async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
+        """WebSocket endpoint for live raffle"""
+        await manager.connect(websocket, raffle_id)
         
-        while True:
-            # Keep connection alive
-            data = await websocket.receive_text()
-            
-            # Handle messages from frontend
-            try:
-                message = json.loads(data)
+        try:
+            # Send current state to new connection
+            async with async_session_maker() as db:
+                raffle_result = await db.execute(
+                    select(Raffle).where(Raffle.id == raffle_id)
+                )
+                raffle = raffle_result.scalar_one_or_none()
                 
-                if message.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
+                if raffle:
+                    await websocket.send_json({
+                        "type": "connection_established",
+                        "raffle": {
+                            "id": raffle.id,
+                            "title": raffle.title,
+                            "is_completed": raffle.is_completed,
+                            "draw_started": raffle.draw_started
+                        }
+                    })
+            
+            while True:
+                # Keep connection alive
+                data = await websocket.receive_text()
+                
+                # Handle messages from frontend
+                try:
+                    message = json.loads(data)
                     
-                # Обработка результата от фронтенда
-                elif message.get("type") == "winner_selected":
-                    logger.info(f"Received winner selection: {message}")
-                    async with async_session_maker() as db:
-                        await handle_winner_selected(
-                            db,
-                            raffle_id,
-                            message.get("winner"),
-                            message.get("position"),
-                            message.get("prize")
-                        )
+                    if message.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
                         
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-                    
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, raffle_id)
+                    # Обработка результата от фронтенда
+                    elif message.get("type") == "winner_selected":
+                        logger.info(f"Received winner selection: {message}")
+                        async with async_session_maker() as db:
+                            await handle_winner_selected(
+                                db,
+                                raffle_id,
+                                message.get("winner"),
+                                message.get("position"),
+                                message.get("prize")
+                            )
+                            
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
+                        
+        except WebSocketDisconnect:
+            manager.disconnect(websocket, raffle_id)
 
 # Предположим, что async_session_maker объявлен где-то выше
 # from app.database import async_session_maker
 
+# В backend/app/routers/websocket.py - замените функцию handle_winner_selected на эту:
+
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str):
     """Handle winner selection from frontend"""
-    state = raffle_states.get(raffle_id)
     try:
-        logger.info("Handling winner for raffle %s, position %s", raffle_id, position)
-
-        # --- отдельная сессия, чтобы не конфликтовать с уже начатой ---
-        async with async_session_maker() as new_db:
-            async with new_db.begin():
-                # 1. Проверка дубликата (с блокировкой строки позиции)
-                existing = await new_db.execute(
-                    select(Winner).where(
-                        Winner.raffle_id == raffle_id,
-                        Winner.position == position
-                    ).with_for_update()
-                )
-                if existing.scalar_one_or_none():
-                    logger.warning("Winner already exists for position %s", position)
-                    # даже если уже есть, фронт надо уведомить
-                    if state:
-                        state["waiting_for_result"] = False
-                    await manager.broadcast({
-                        "type": "winner_confirmed",
-                        "position": position,
-                        "winner": winner_data,  # можно прислать что есть
-                        "prize": prize,
-                        "already_exists": True
-                    }, raffle_id)
-                    return
-
-                # 2. Находим пользователя
-                user_res = await new_db.execute(
-                    select(User).where(User.telegram_id == winner_data["id"])
-                )
-                user = user_res.scalar_one_or_none()
-                if not user:
-                    logger.error("User with telegram_id %s not found", winner_data["id"])
-                    if state:
-                        state["waiting_for_result"] = False
-                    # Можно отправить фронту событие об ошибке
-                    await manager.broadcast({
-                        "type": "winner_error",
-                        "position": position,
-                        "reason": "user_not_found"
-                    }, raffle_id)
-                    return
-
-                # 3. Сохраняем победителя
-                winner_row = Winner(
-                    raffle_id=raffle_id,
-                    user_id=user.id,
-                    position=position,
-                    prize=prize
-                )
-                new_db.add(winner_row)
-                await new_db.flush()  # получим ID, если надо
-
-            # ❗ транзакция закрылась, теперь commit за пределами begin
-            await new_db.commit()
-
-        # 4. Обновляем локальное состояние
-        if state:
-            state["waiting_for_result"] = False
-            state["winners"].append(winner_data)
-            state["remaining_participants"] = [
-                p for p in state["remaining_participants"]
-                if (p.get("id") if isinstance(p, dict) else getattr(p, "telegram_id", None)) != winner_data["id"]
+        logger.info(f"Handling winner for raffle {raffle_id}, position {position}")
+        
+        # Уникальный ключ для предотвращения дубликатов
+        winner_key = f"{raffle_id}:{position}"
+        
+        # Проверяем состояние розыгрыша
+        state = raffle_states.get(raffle_id)
+        if not state:
+            logger.warning(f"No state found for raffle {raffle_id}")
+            return
+            
+        # Проверяем, что это правильная позиция
+        current_round = state.get('current_round')
+        if not current_round or current_round['position'] != position:
+            logger.warning(f"Position mismatch: expected {current_round}, got {position}")
+            return
+        
+        # Проверяем, не обработан ли уже этот раунд
+        if not state.get('waiting_for_result'):
+            logger.warning(f"Not waiting for result for position {position}")
+            return
+        
+        # Find user by telegram_id
+        user_result = await db.execute(
+            select(User).where(User.telegram_id == winner_data['id'])
+        )
+        user = user_result.scalar_one_or_none()
+        
+        if not user:
+            logger.error(f"User with telegram_id {winner_data['id']} not found")
+            return
+        
+        # Используем отдельную транзакцию
+        try:
+            # Проверяем с блокировкой
+            existing_winner = await db.execute(
+                select(Winner).where(
+                    Winner.raffle_id == raffle_id,
+                    Winner.position == position
+                ).with_for_update(skip_locked=True)
+            )
+            
+            if existing_winner.scalar_one_or_none():
+                logger.warning(f"Winner already exists for position {position} in raffle {raffle_id}")
+                return
+            
+            # Создаем победителя
+            winner_record = Winner(
+                raffle_id=raffle_id,
+                user_id=user.id,
+                position=position,
+                prize=prize
+            )
+            db.add(winner_record)
+            await db.flush()
+            
+            # Обновляем состояние ПЕРЕД коммитом
+            state['waiting_for_result'] = False
+            state['winners'].append(winner_data)
+            # Удаляем победителя из оставшихся участников
+            state['remaining_participants'] = [
+                p for p in state['remaining_participants'] 
+                if p.telegram_id != winner_data['id']
             ]
-
-        # 5. Шлём подтверждение клиентам
-        await manager.broadcast({
-            "type": "winner_confirmed",
-            "position": position,
-            "winner": winner_data,
-            "prize": prize
-        }, raffle_id)
-
-        logger.info("Winner confirmed for position %s", position)
-
-        # 6. Проверяем, не закончились ли призы
-        await check_raffle_completion(raffle_id)
-
-    except Exception:
-        logger.exception("Error handling winner selection")
-        if state:
-            state["waiting_for_result"] = False
+            
+            # Коммитим транзакцию
+            await db.commit()
+            
+            # Broadcast winner to all clients ПОСЛЕ успешного коммита
+            await manager.broadcast({
+                "type": "winner_confirmed",
+                "position": position,
+                "winner": winner_data,
+                "prize": prize
+            }, raffle_id)
+            
+            logger.info(f"Winner saved for position {position}: {winner_data.get('username', 'Unknown')}")
+            
+            # Check if all prizes have been distributed
+            winners_count_result = await db.execute(
+                select(func.count(Winner.id)).where(Winner.raffle_id == raffle_id)
+            )
+            winners_count = winners_count_result.scalar()
+            
+            raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
+            raffle = raffle_result.scalar_one_or_none()
+            
+            if raffle and winners_count >= len(raffle.prizes):
+                logger.info(f"All prizes distributed for raffle {raffle_id}")
+                
+                # All prizes distributed, complete the raffle
+                raffle.is_completed = True
+                raffle.is_active = False
+                await db.commit()
+                
+                # Очищаем состояние
+                if raffle_id in raffle_states:
+                    del raffle_states[raffle_id]
+                
+                # Get all winners for final broadcast
+                winners_result = await db.execute(
+                    select(Winner, User).join(User).where(
+                        Winner.raffle_id == raffle_id
+                    ).order_by(Winner.position)
+                )
+                winners_data = winners_result.all()
+                
+                winners = []
+                for winner, user in winners_data:
+                    winners.append({
+                        "position": winner.position,
+                        "user": {
+                            "id": user.telegram_id,
+                            "username": user.username,
+                            "first_name": user.first_name,
+                            "last_name": user.last_name
+                        },
+                        "prize": winner.prize
+                    })
+                
+                await manager.broadcast({
+                    "type": "raffle_complete",
+                    "winners": winners
+                }, raffle_id)
+                
+                # Send notifications
+                await NotificationService.notify_winners(raffle_id, winners)
+                await NotificationService.notify_raffle_results(raffle_id, winners)
+                
+                logger.info(f"Raffle {raffle_id} completed successfully")
+                
+        except Exception as e:
+            await db.rollback()
+            logger.exception(f"Error in transaction: {e}")
+            raise
+                
+    except Exception as e:
+        logger.exception(f"Error handling winner selection: {e}")
