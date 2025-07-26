@@ -184,135 +184,92 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
     except WebSocketDisconnect:
         manager.disconnect(websocket, raffle_id)
 
+# Предположим, что async_session_maker объявлен где-то выше
+# from app.database import async_session_maker
+
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str):
     """Handle winner selection from frontend"""
+    state = raffle_states.get(raffle_id)
     try:
-        logger.info(f"Handling winner for raffle {raffle_id}, position {position}")
-        
-        # Проверяем, нет ли уже победителя для этой позиции
-        existing_winner = await db.execute(
-            select(Winner).where(
-                Winner.raffle_id == raffle_id,
-                Winner.position == position
-            )
-        )
-        if existing_winner.scalar_one_or_none():
-            logger.warning(f"Winner already exists for position {position} in raffle {raffle_id}")
-            return
-        
-        # Find user by telegram_id
-        user_result = await db.execute(
-            select(User).where(User.telegram_id == winner_data['id'])
-        )
-        user = user_result.scalar_one_or_none()
-        
-        if not user:
-            logger.error(f"User with telegram_id {winner_data['id']} not found")
-            return
-        
-        # Начинаем транзакцию
-        async with db.begin():
-            # Повторная проверка с блокировкой
-            existing_winner = await db.execute(
-                select(Winner).where(
-                    Winner.raffle_id == raffle_id,
-                    Winner.position == position
-                ).with_for_update()
-            )
-            if existing_winner.scalar_one_or_none():
-                logger.warning(f"Winner already exists (in transaction) for position {position}")
-                return
-            
-            # Save winner to database
-            winner_record = Winner(
-                raffle_id=raffle_id,
-                user_id=user.id,
-                position=position,
-                prize=prize
-            )
-            db.add(winner_record)
-            await db.flush()  # Применяем изменения в рамках транзакции
-            
-            # Обновляем состояние розыгрыша
-            state = raffle_states.get(raffle_id)
-            if state:
-                state['waiting_for_result'] = False
-                state['winners'].append(winner_data)
-                # Удаляем победителя из оставшихся участников
-                state['remaining_participants'] = [
-                    p for p in state['remaining_participants'] 
-                    if p.telegram_id != winner_data['id']
-                ]
-            
-            # Broadcast winner to all clients
-            await manager.broadcast({
-                "type": "winner_confirmed",
-                "position": position,
-                "winner": winner_data,
-                "prize": prize
-            }, raffle_id)
-            
-            logger.info(f"Winner saved for position {position}: {winner_data.get('username', 'Unknown')}")
-        
-        # После коммита транзакции проверяем завершение розыгрыша
-        # Check if all prizes have been distributed
-        raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
-        raffle = raffle_result.scalar_one_or_none()
-        
-        if not raffle:
-            return
-        
-        winners_count_result = await db.execute(
-            select(func.count(Winner.id)).where(Winner.raffle_id == raffle_id)
-        )
-        winners_count = winners_count_result.scalar()
-        
-        if winners_count >= len(raffle.prizes):
-            logger.info(f"All prizes distributed for raffle {raffle_id}")
-            
-            # All prizes distributed, complete the raffle
-            raffle.is_completed = True
-            raffle.is_active = False
-            await db.commit()
-            
-            # Очищаем состояние
-            if raffle_id in raffle_states:
-                del raffle_states[raffle_id]
-            
-            # Get all winners for final broadcast
-            winners_result = await db.execute(
-                select(Winner, User).join(User).where(
-                    Winner.raffle_id == raffle_id
-                ).order_by(Winner.position)
-            )
-            winners_data = winners_result.all()
-            
-            winners = []
-            for winner, user in winners_data:
-                winners.append({
-                    "position": winner.position,
-                    "user": {
-                        "id": user.telegram_id,
-                        "username": user.username,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name
-                    },
-                    "prize": winner.prize
-                })
-            
-            await manager.broadcast({
-                "type": "raffle_complete",
-                "winners": winners
-            }, raffle_id)
-            
-            # Send notifications to winners
-            await NotificationService.notify_winners(raffle_id, winners)
+        logger.info("Handling winner for raffle %s, position %s", raffle_id, position)
 
-            # Send notifications about results to all users and channels
-            await NotificationService.notify_raffle_results(raffle_id, winners)
+        # --- отдельная сессия, чтобы не конфликтовать с уже начатой ---
+        async with async_session_maker() as new_db:
+            async with new_db.begin():
+                # 1. Проверка дубликата (с блокировкой строки позиции)
+                existing = await new_db.execute(
+                    select(Winner).where(
+                        Winner.raffle_id == raffle_id,
+                        Winner.position == position
+                    ).with_for_update()
+                )
+                if existing.scalar_one_or_none():
+                    logger.warning("Winner already exists for position %s", position)
+                    # даже если уже есть, фронт надо уведомить
+                    if state:
+                        state["waiting_for_result"] = False
+                    await manager.broadcast({
+                        "type": "winner_confirmed",
+                        "position": position,
+                        "winner": winner_data,  # можно прислать что есть
+                        "prize": prize,
+                        "already_exists": True
+                    }, raffle_id)
+                    return
 
-            logger.info(f"Raffle {raffle_id} completed successfully")
-                
-    except Exception as e:
-        logger.error(f"Error handling winner selection: {e}")
-        await db.rollback()
+                # 2. Находим пользователя
+                user_res = await new_db.execute(
+                    select(User).where(User.telegram_id == winner_data["id"])
+                )
+                user = user_res.scalar_one_or_none()
+                if not user:
+                    logger.error("User with telegram_id %s not found", winner_data["id"])
+                    if state:
+                        state["waiting_for_result"] = False
+                    # Можно отправить фронту событие об ошибке
+                    await manager.broadcast({
+                        "type": "winner_error",
+                        "position": position,
+                        "reason": "user_not_found"
+                    }, raffle_id)
+                    return
+
+                # 3. Сохраняем победителя
+                winner_row = Winner(
+                    raffle_id=raffle_id,
+                    user_id=user.id,
+                    position=position,
+                    prize=prize
+                )
+                new_db.add(winner_row)
+                await new_db.flush()  # получим ID, если надо
+
+            # ❗ транзакция закрылась, теперь commit за пределами begin
+            await new_db.commit()
+
+        # 4. Обновляем локальное состояние
+        if state:
+            state["waiting_for_result"] = False
+            state["winners"].append(winner_data)
+            state["remaining_participants"] = [
+                p for p in state["remaining_participants"]
+                if (p.get("id") if isinstance(p, dict) else getattr(p, "telegram_id", None)) != winner_data["id"]
+            ]
+
+        # 5. Шлём подтверждение клиентам
+        await manager.broadcast({
+            "type": "winner_confirmed",
+            "position": position,
+            "winner": winner_data,
+            "prize": prize
+        }, raffle_id)
+
+        logger.info("Winner confirmed for position %s", position)
+
+        # 6. Проверяем, не закончились ли призы
+        await check_raffle_completion(raffle_id)
+
+    except Exception:
+        logger.exception("Error handling winner selection")
+        if state:
+            state["waiting_for_result"] = False
