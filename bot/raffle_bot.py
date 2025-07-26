@@ -368,11 +368,67 @@ async def upload_photo_to_api(photo_file_id: str) -> str:
     # Пока возвращаем file_id, так как API может не поддерживать загрузку
     return photo_file_id
 
-# Обработчики команд
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     """Обработка команды /start"""
     user = message.from_user
+    
+    # Регистрируем пользователя через API
+    try:
+        # Создаем initData для авторизации
+        auth_date = int(time.time())
+        user_data = {
+            "id": str(user.id),
+            "first_name": user.first_name,
+            "last_name": user.last_name or "",
+            "username": user.username or ""
+        }
+        
+        user_json = json.dumps(user_data, separators=(",", ":"), ensure_ascii=False)
+        encoded_user = urllib.parse.quote(user_json)
+        
+        params = {
+            "auth_date": str(auth_date),
+            "user": user_json
+        }
+        
+        data_check_arr = []
+        for key in sorted(params.keys()):
+            data_check_arr.append(f"{key}={params[key]}")
+        data_check_string = "\n".join(data_check_arr)
+        
+        secret_key = hmac.new(
+            b"WebAppData",
+            BOT_TOKEN.encode(),
+            hashlib.sha256
+        ).digest()
+        
+        hash_value = hmac.new(
+            secret_key,
+            data_check_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+        
+        headers = {
+            "Authorization": f"Bearer {init_data}",
+        }
+        
+        # Получаем информацию о пользователе через API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{API_URL}/api/users/me",
+                headers=headers,
+                ssl=False
+            ) as response:
+                if response.status != 200:
+                    logger.warning(f"User {user.id} not registered in API")
+                    
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+    
+    # Также сохраняем в локальную базу для совместимости
     db.add_user(user.id, user.username, user.first_name, user.last_name)
     
     keyboard = create_admin_keyboard() if user.id in ADMIN_IDS else create_main_keyboard()
@@ -412,15 +468,69 @@ async def create_raffle_not_allowed(message: types.Message):
 
 @dp.message(F.text == "📢 Получать уведомления")
 async def manage_notifications(message: types.Message):
-    """Получать уведомления"""
+    """Получать уведомления через API"""
     user_id = message.from_user.id
-    notifications_enabled = db.toggle_notifications(user_id)
     
-    status = "включены ✅" if notifications_enabled else "выключены ❌"
-    await message.answer(
-        f"Уведомления {status}\n\n"
-        f"{'Теперь вы будете получать информацию о новых розыгрышах!' if notifications_enabled else 'Вы больше не будете получать уведомления о новых розыгрышах.'}"
-    )
+    try:
+        # Создаем initData для авторизации
+        auth_date = int(time.time())
+        user_data = {
+            "id": str(user_id),
+            "first_name": message.from_user.first_name,
+            "last_name": message.from_user.last_name or "",
+            "username": message.from_user.username or ""
+        }
+        
+        user_json = json.dumps(user_data, separators=(",", ":"), ensure_ascii=False)
+        encoded_user = urllib.parse.quote(user_json)
+        
+        params = {
+            "auth_date": str(auth_date),
+            "user": user_json
+        }
+        
+        data_check_arr = []
+        for key in sorted(params.keys()):
+            data_check_arr.append(f"{key}={params[key]}")
+        data_check_string = "\n".join(data_check_arr)
+        
+        secret_key = hmac.new(
+            b"WebAppData",
+            BOT_TOKEN.encode(),
+            hashlib.sha256
+        ).digest()
+        
+        hash_value = hmac.new(
+            secret_key,
+            data_check_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        init_data = f"user={encoded_user}&auth_date={auth_date}&hash={hash_value}"
+        
+        headers = {
+            "Authorization": f"Bearer {init_data}",
+        }
+        
+        # Переключаем уведомления через API
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(
+                f"{API_URL}/api/users/me/notifications",
+                headers=headers,
+                ssl=False
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    notifications_enabled = data.get("notifications_enabled", False)
+                    message_text = data.get("message", "")
+                    
+                    await message.answer(message_text)
+                else:
+                    raise Exception("API error")
+                    
+    except Exception as e:
+        logger.error(f"Error toggling notifications: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
 
 @dp.message(F.text == "🎯 Активные розыгрыши")
 async def show_active_raffles(message: types.Message):
