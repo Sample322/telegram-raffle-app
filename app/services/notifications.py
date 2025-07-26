@@ -171,6 +171,136 @@ class NotificationService:
                 logger.error(f"Error notifying winner {winner['user']['id']}: {e}")
     
     @staticmethod
+    async def notify_raffle_results(raffle_id: int, winners: List[Dict]):
+        """Notify all users and channels about raffle results"""
+        async with async_session_maker() as db:
+            # Get raffle data
+            raffle_result = await db.execute(
+                select(Raffle).where(Raffle.id == raffle_id)
+            )
+            raffle = raffle_result.scalar_one_or_none()
+            
+            if not raffle:
+                logger.error(f"Raffle {raffle_id} not found for results notification")
+                return
+            
+            # Format winners text
+            winners_text = "\n".join([
+                f"{w['position']}. @{w['user']['username'] or w['user']['first_name']} - {w['prize']}"
+                for w in sorted(winners, key=lambda x: x['position'])
+            ])
+            
+            # Get users with notifications enabled
+            users_result = await db.execute(
+                select(User).where(User.notifications_enabled == True)
+            )
+            users = users_result.scalars().all()
+            user_ids = [u.telegram_id for u in users]
+            
+            # Also get all participants
+            participants_result = await db.execute(
+                select(User).join(Participant).where(
+                    Participant.raffle_id == raffle_id
+                )
+            )
+            participants = participants_result.scalars().all()
+            participant_ids = [p.telegram_id for p in participants]
+            
+            # Combine and deduplicate
+            all_user_ids = list(set(user_ids + participant_ids))
+            
+            # Send to users
+            keyboard = {
+                "inline_keyboard": [[{
+                    "text": "📊 Посмотреть результаты",
+                    "web_app": {"url": f"{os.getenv('WEBAPP_URL')}/raffle/{raffle_id}/history"}
+                }]]
+            }
+            
+            text = (
+                f"🎊 **Розыгрыш завершен!**\n\n"
+                f"**{raffle.title}**\n\n"
+                f"🏆 **Победители:**\n{winners_text}\n\n"
+                f"Поздравляем победителей! 🎉"
+            )
+            
+            for user_id in all_user_ids:
+                await TelegramService.send_notification(
+                    user_id,
+                    text,
+                    raffle.photo_url,
+                    keyboard
+                )
+                await asyncio.sleep(0.05)
+            
+            # Send to post channels
+            if raffle.post_channels:
+                await NotificationService.notify_channels_results(
+                    raffle_id,
+                    raffle.title,
+                    raffle.photo_url,
+                    raffle.post_channels,
+                    winners_text
+                )
+
+    @staticmethod
+    async def notify_channels_results(raffle_id: int, title: str, photo_url: str, channels: List[str], winners_text: str):
+        """Notify channels about raffle results"""
+        import os
+        BOT_TOKEN = os.getenv("BOT_TOKEN")
+        WEBAPP_URL = os.getenv("WEBAPP_URL")
+        
+        text = (
+            f"🎊 **Розыгрыш завершен!**\n\n"
+            f"**{title}**\n\n"
+            f"🏆 **Победители:**\n{winners_text}\n\n"
+            f"Поздравляем победителей! 🎉"
+        )
+        
+        keyboard = {
+            "inline_keyboard": [[{
+                "text": "📊 Все результаты",
+                "url": f"{WEBAPP_URL}/raffle/{raffle_id}/history"
+            }]]
+        }
+        
+        import aiohttp
+        
+        for channel in channels:
+            channel = channel.replace('@', '')
+            try:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/"
+                
+                if photo_url and photo_url.startswith('http'):
+                    data = {
+                        "chat_id": f"@{channel}",
+                        "photo": photo_url,
+                        "caption": text,
+                        "parse_mode": "Markdown",
+                        "reply_markup": keyboard
+                    }
+                    method = "sendPhoto"
+                else:
+                    data = {
+                        "chat_id": f"@{channel}",
+                        "text": text,
+                        "parse_mode": "Markdown",
+                        "reply_markup": keyboard
+                    }
+                    method = "sendMessage"
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url + method, json=data) as response:
+                        result = await response.json()
+                        if not result.get("ok"):
+                            logger.error(f"Failed to notify channel @{channel} about results: {result}")
+                        else:
+                            logger.info(f"Successfully notified channel @{channel} about results")
+                            
+            except Exception as e:
+                logger.error(f"Error notifying channel @{channel} about results: {e}")
+
+    @staticmethod
     async def notify_channel_check_reminder(raffle_id: int):
         """Send reminder to check channel subscriptions before raffle ends"""
         async with async_session_maker() as db:

@@ -74,8 +74,12 @@ async def create_raffle(
         user_ids = [user.telegram_id for user in users]
         
         # For notifications, format the date back to Moscow time
+        from ..config import convert_from_utc
+        # Конвертируем UTC время обратно в московское для уведомлений
+        moscow_time_for_notification = convert_from_utc(raffle.end_date)
+        
         notification_data = raffle_data.dict()
-        notification_data['end_date'] = moscow_time.strftime('%d.%m.%Y в %H:%M МСК')
+        notification_data['end_date'] = moscow_time_for_notification.strftime('%d.%m.%Y в %H:%M МСК')
         notification_data['id'] = raffle.id
         # Передаем полный URL изображения
         notification_data['photo_url'] = raffle.photo_url
