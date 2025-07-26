@@ -328,31 +328,10 @@ function LiveRafflePage() {
           </div>
         </div>
 
-        {/* Participants List */}
-        <div className="mt-8 bg-white/10 backdrop-blur rounded-lg p-6">
-          <h3 className="text-xl font-semibold mb-4">
-            👥 Участники ({participants.length})
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {participants.map((participant) => {
-              const isWinner = winners.some(w => 
-                w.winner?.id === participant.telegram_id || 
-                w.user?.id === participant.telegram_id
-              );
-              
-              return (
-                <div 
-                  key={participant.id} 
-                  className={`rounded-lg px-3 py-2 text-sm transition-all ${
-                    isWinner ? 'bg-green-500/30 font-bold' : 'bg-white/10'
-                  }`}
-                >
-                  @{participant.username || `${participant.first_name} ${participant.last_name || ''}`.trim()}
-                  {isWinner && ' 🏆'}
-                </div>
-              );
-            })}
-          </div>
+        {/* Participants Count */}
+        <div className="mt-8 bg-white/10 backdrop-blur rounded-lg p-6 text-center">
+          <h3 className="text-2xl font-semibold mb-2">👥 Всего участников</h3>
+          <p className="text-4xl font-bold">{participants.length}</p>
         </div>
 
         {/* Completed message */}
