@@ -214,32 +214,36 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             del raffle_states[raffle_id]
 
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
-    # Проверяем предопределённого победителя
-    predetermined = state.get('predetermined_winner')
-    if predetermined and predetermined['position'] == position:
-            if winner_data['id'] != predetermined['id']:
-                logger.warning(f"Winner mismatch: expected {predetermined['id']}, got {winner_data['id']}")
-                # Но всё равно продолжаем с тем, что прислал фронт для обратной совместимости
     """Handle winner selection from frontend. Returns True if successful."""
     try:
-                # Проверяем messageId для идемпотентности
-        message_id = winner_data.get('messageId')
-        if message_id and message_id in processed_messages.get(raffle_id, set()):
-            logger.info(f"Duplicate message {message_id} ignored")
-            return False
-        logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
-        
-        # Проверяем состояние розыгрыша
+        # Получаем состояние розыгрыша В НАЧАЛЕ функции
         state = raffle_states.get(raffle_id)
         if not state:
             logger.error(f"No state found for raffle {raffle_id}")
             return False
             
+        # Проверяем messageId для идемпотентности
+        message_id = winner_data.get('messageId')
+        if message_id and message_id in processed_messages.get(raffle_id, set()):
+            logger.info(f"Duplicate message {message_id} ignored")
+            return False
+            
+        # Проверяем предопределённого победителя
+        predetermined = state.get('predetermined_winner')
+        if predetermined and predetermined['position'] == position:
+            if winner_data['id'] != predetermined['id']:
+                logger.warning(f"Winner mismatch: expected {predetermined['id']}, got {winner_data['id']}")
+                # Но всё равно продолжаем с тем, что прислал фронт для обратной совместимости
+                
+        logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
+        
         # Проверяем, что это правильная позиция
         current_round = state.get('current_round')
         if not current_round or current_round['position'] != position:
             logger.warning(f"Position mismatch: expected {current_round}, got {position}")
             return False
+        
+        # ... остальной код функции остается без изменений ...
         
         # Проверяем, не обработан ли уже этот раунд
         if position in state.get('completed_positions', set()):
