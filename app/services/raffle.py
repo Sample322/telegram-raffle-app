@@ -100,7 +100,8 @@ class RaffleService:
                 
                 if raffle and not raffle.is_completed:
                     logger.info(f"Starting wheel for raffle {raffle_id}")
-                    await RaffleWheel.run_wheel(raffle_id, db)
+                    from ..routers.websocket import run_wheel
+                    await run_wheel(raffle_id, db)
                     
         except Exception as e:
             logger.error(f"Error in wheel delay for raffle {raffle_id}: {e}")
