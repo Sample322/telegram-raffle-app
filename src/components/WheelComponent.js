@@ -9,13 +9,16 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const [error, setError] = useState(false);
   const lastNotificationTimeRef = useRef(0);
   const currentPrizeRef = useRef(null); // НОВОЕ: отслеживаем текущий приз
-  
+  const processedMessagesRef = useRef(new Set()); // Кеш обработанных сообщений
+  const isSendingRef = useRef(false); // Флаг отправки
   // НОВОЕ: Сброс состояния при смене приза
   useEffect(() => {
     if (currentPrize && currentPrize !== currentPrizeRef.current) {
       currentPrizeRef.current = currentPrize;
       hasNotifiedRef.current = false;
       lastNotificationTimeRef.current = 0;
+      processedMessagesRef.current.clear(); // Очищаем кеш
+      isSendingRef.current = false;
       setError(false);
       console.log('Reset notification state for new prize:', currentPrize);
     }
@@ -256,20 +259,24 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
           
           const winner = participants[winnerIndex];
           
-          // Защита от множественных отправок
           const now = Date.now();
-          const timeSinceLastNotification = now - lastNotificationTimeRef.current;
-          
-          if (timeSinceLastNotification < 2000) { // 2 секунды минимум между отправками
-            console.log('Skipping duplicate notification, time since last:', timeSinceLastNotification);
-            return;
-          }
-          
-          // Дополнительная проверка на текущий приз
-          if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
-            console.log('Prize mismatch, skipping notification');
-            return;
-          }
+          const messageId = `${raffleId}_${currentPrize.position}_${now}`;
+            
+            // Проверяем, не отправляли ли уже это сообщение
+            if (processedMessagesRef.current.has(messageId) || isSendingRef.current) {
+              console.log('Skipping duplicate message:', messageId);
+              return;
+            }
+            
+            // Блокируем повторную отправку
+            isSendingRef.current = true;
+            processedMessagesRef.current.add(messageId);
+            
+            // Дополнительная проверка на текущий приз
+            if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
+              console.log('Prize mismatch, skipping notification');
+              return;
+            }
           
           lastNotificationTimeRef.current = now;
           
@@ -282,12 +289,12 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
               position: currentPrize.position,
               prize: currentPrize.prize,
               timestamp: now,
-              messageId: `${raffleId}_${currentPrize.position}_${now}`
+              messageId: messageId
             };
             console.log('Sending winner to server:', message);
             socket.send(JSON.stringify(message));
           }
-          
+          setTimeout(() => { isSendingRef.current = false; }, 1000);
           onComplete && onComplete(winner);
         }, 500);
       }

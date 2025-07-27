@@ -135,14 +135,28 @@ function LiveRafflePage() {
                     // В switch statement для ws.onmessage добавить:
           case 'round_complete':
             console.log(`Round ${data.position} completed`);
-            // Сбрасываем текущий раунд для следующего
-            setCurrentRound(null);
-            setIsSpinning(false);
+            // Обновляем состояние для следующего раунда
+          setCurrentRound(prev => {
+            if (prev && prev.position === data.position) {
+              return null; // Сбрасываем только если это тот же раунд
+            }
+            return prev;
+          });
+          setIsSpinning(false);
+          // Обновляем участников, исключая победителя
+          if (data.winner_id) {
+            setParticipants(prev => prev.filter(p => p.telegram_id !== data.winner_id));
+          }
             break;
         case 'raffle_complete':
           setWinners(data.winners);
           setConnectionStatus('completed');
+          setCurrentRound(null);
+          setIsSpinning(false);
           toast.success('🎊 Розыгрыш завершен!');
+          // Отключаем WebSocket после завершения
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.close();}
           break;
           
         case 'countdown':
