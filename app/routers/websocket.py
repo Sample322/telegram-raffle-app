@@ -110,14 +110,24 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                         "first_name": participant.first_name,
                         "last_name": participant.last_name
                     })
+            # Выбираем победителя на сервере
+            winner_index = random.randint(0, len(wheel_participants) - 1)
+            winner_id = wheel_participants[winner_index]['id']
             
+            # Сохраняем в состоянии
+            state['predetermined_winner'] = {
+                'index': winner_index,
+                'id': winner_id,
+                'position': int(position)
+            }
             # Send wheel data
             await manager.broadcast({
                 "type": "wheel_start",
                 "position": int(position),
                 "prize": raffle.prizes[position],
                 "participants": wheel_participants,
-                "participant_order": [p["id"] for p in wheel_participants]  # Явный порядок
+                "participant_order": [p["id"] for p in wheel_participants],
+                "target_winner_index": winner_index  # Индекс победителя  
             }, raffle_id)
             
             logger.info(f"Started wheel for position {position}, waiting for result...")
