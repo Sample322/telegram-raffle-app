@@ -1,3 +1,4 @@
+import React, { useRef, useEffect, useState } from 'react';
 const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, wheelSpeed = 'fast' }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
@@ -60,30 +61,37 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   }, [isSpinning, participants, error, currentPrize]); // Добавляем currentPrize в зависимости
 
   const getCurrentSegmentIndex = () => {
-    if (participants.length === 0) return -1;
+  if (participants.length === 0) return -1;
 
-    // Нормализуем угол колеса в диапазоне [0, 2π)
-    const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  // Нормализуем угол колеса в диапазоне [0, 2π)
+  const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-    // Стрелка находится сверху (3π/2 или 270°)
-    // Вычисляем, на какой сегмент она указывает
-    const pointerAngle = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
-
-    const segmentAngle = (2 * Math.PI) / participants.length;
-    const index = Math.floor(pointerAngle / segmentAngle);
-    
-    // Логирование для отладки
-    console.log('Angle calculation:', {
-      rawAngle: angleRef.current,
-      normalized,
-      pointerAngle,
-      segmentAngle,
-      calculatedIndex: index,
-      participant: participants[index]
-    });
-    
-    return index;
-  };
+  // Стрелка находится сверху (3π/2 или 270°)
+  // Колесо рисуется от 0 радиан по часовой стрелке
+  // Но вращается против часовой стрелки (положительный angleRef.current)
+  
+  // Вычисляем, какой сегмент под стрелкой
+  // Стрелка указывает на угол 3π/2 (270°)
+  const segmentAngle = (2 * Math.PI) / participants.length;
+  
+  // Угол от начала первого сегмента до стрелки с учетом вращения
+  const angleFromStart = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
+  
+  // Индекс сегмента
+  const index = Math.floor(angleFromStart / segmentAngle) % participants.length;
+  
+  // Логирование для отладки
+  console.log('Angle calculation:', {
+    rawAngle: angleRef.current,
+    normalized,
+    angleFromStart,
+    segmentAngle,
+    calculatedIndex: index,
+    participant: participants[index]
+  });
+  
+  return index;
+};
 
   const updateCurrentParticipant = () => {
     const index = getCurrentSegmentIndex();

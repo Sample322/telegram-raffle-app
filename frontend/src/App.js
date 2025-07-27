@@ -37,13 +37,22 @@ function App() {
   }, []);
 
   const checkAdminStatus = async () => {
-    try {
+  try {
+    // Проверяем админа только если есть initData
+    if (WebApp.initData) {
       await api.get('/admin/statistics');
       setIsAdmin(true);
-    } catch (error) {
+    } else {
       setIsAdmin(false);
     }
-  };
+  } catch (error) {
+    // Не логируем 403 ошибки - это нормально для не-админов
+    if (error.response?.status !== 403) {
+      console.error('Admin check error:', error);
+    }
+    setIsAdmin(false);
+  }
+};
 
   if (isLoading) {
     return (

@@ -29,11 +29,19 @@ export const AuthProvider = ({ children }) => {
           photoUrl: telegramUser.photo_url
         });
 
-        // Check admin status
         try {
-          await api.get('/admin/statistics');
-          setIsAdmin(true);
+          // Проверяем админский статус только если есть пользователь
+          if (telegramUser) {
+            const response = await api.get('/admin/statistics');
+            if (response.status === 200) {
+              setIsAdmin(true);
+            }
+          }
         } catch (error) {
+          // Молча игнорируем 403/401 ошибки - это нормально для обычных пользователей
+          if (error.response?.status !== 403 && error.response?.status !== 401) {
+            console.error('Admin check error:', error);
+          }
           setIsAdmin(false);
         }
       }

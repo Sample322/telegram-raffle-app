@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 import os
 import logging
+from fastapi import HTTPException
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -80,8 +81,14 @@ async def get_db():
     async with async_session_maker() as session:
         try:
             yield session
+        except HTTPException:
+            # HTTP исключения пробрасываем как есть (401, 403, etc)
+            await session.rollback()
+            raise
         except Exception as e:
-            logger.exception("Database session error")  # Используем exception вместо error
+            # Логируем только реальные ошибки БД
+            if "HTTPException" not in str(type(e)):
+                logger.exception("Database session error")
             await session.rollback()
             raise
         finally:
