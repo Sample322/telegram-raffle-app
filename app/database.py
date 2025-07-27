@@ -87,7 +87,7 @@ async def get_db():
             raise
         except Exception as e:
             # Логируем только реальные ошибки БД
-            if "HTTPException" not in str(type(e)):
+            if not isinstance(e, HTTPException) and "HTTPException" not in str(type(e)):
                 logger.exception("Database session error")
             await session.rollback()
             raise
