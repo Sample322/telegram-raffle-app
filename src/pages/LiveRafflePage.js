@@ -91,12 +91,23 @@ function LiveRafflePage() {
           break;
           
         case 'wheel_start':
-        // ВАЖНО: используем participant_order с бэкенда для правильного порядка
-        const orderedParticipants = data.participant_order 
-          ? data.participant_order.map(id => 
-              data.participants.find(p => p.id === id)
-            ).filter(Boolean)
-          : data.participants;
+        // ВАЖНО: всегда используем порядок с бэкенда
+          let orderedParticipants = [];
+          if (data.participant_order && data.participant_order.length > 0) {
+            // Мапим по порядку с бэкенда
+            orderedParticipants = data.participant_order.map(tid => {
+              const participant = data.participants.find(p => p.id === tid);
+              if (!participant) {
+                console.error(`Participant with id ${tid} not found in participants list`);
+              }
+              return participant;
+            }).filter(Boolean);
+          } else {
+            console.error('No participant_order received from backend!');
+            orderedParticipants = data.participants;
+          }
+          
+          console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
         
         setCurrentRound({
           position: data.position,
