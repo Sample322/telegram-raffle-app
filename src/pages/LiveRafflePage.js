@@ -91,14 +91,21 @@ function LiveRafflePage() {
           break;
           
         case 'wheel_start':
-          setCurrentRound({
+        // ВАЖНО: используем participant_order с бэкенда для правильного порядка
+        const orderedParticipants = data.participant_order 
+          ? data.participant_order.map(id => 
+              data.participants.find(p => p.id === id)
+            ).filter(Boolean)
+          : data.participants;
+        
+        setCurrentRound({
           position: data.position,
           prize: data.prize,
-          participants: data.participants
-          });
-          setIsSpinning(true);
-          toast(`🎰 Разыгрывается ${data.position} место!`);
-          break;
+          participants: orderedParticipants  // Используем упорядоченных участников
+        });
+        setIsSpinning(true);
+        toast(`🎰 Разыгрывается ${data.position} место!`);
+        break;
          
         case 'winner_confirmed':
           setWinners(prev => {
