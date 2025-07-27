@@ -37,22 +37,23 @@ function App() {
   }, []);
 
   const checkAdminStatus = async () => {
-  try {
-    // Проверяем админа только если есть initData
-    if (WebApp.initData) {
-      await api.get('/admin/statistics');
-      setIsAdmin(true);
-    } else {
-      setIsAdmin(false);
-    }
-  } catch (error) {
-    // Не логируем 403 ошибки - это нормально для не-админов
-    if (error.response?.status !== 403) {
-      console.error('Admin check error:', error);
-    }
-    setIsAdmin(false);
-  }
-};
+      try {
+        // Проверяем админа только если есть initData
+        if (!WebApp.initData || WebApp.initData === '') {
+          setIsAdmin(false);
+          return;
+        }
+        
+        await api.get('/admin/statistics');
+        setIsAdmin(true);
+      } catch (error) {
+        // Не логируем 403/401 ошибки - это нормально для не-админов
+        if (error.response?.status !== 403 && error.response?.status !== 401) {
+          console.error('Admin check error:', error);
+        }
+        setIsAdmin(false);
+      }
+    };
 
   if (isLoading) {
     return (

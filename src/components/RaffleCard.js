@@ -13,8 +13,10 @@ const RaffleCard = ({ raffle }) => {
 
   useEffect(() => {
     // Проверяем участие только если есть авторизация
-    if (window.Telegram?.WebApp?.initData) {
+    if (window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData !== '') {
       checkParticipation();
+    } else {
+      setLoading(false);
     }
   }, [raffle.id]);
 

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, wheelSpeed = 'fast' }) => {
+const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, socket, raffleId, wheelSpeed = 'fast', targetAngle }) => {
   const canvasRef = useRef(null);
   const angleRef = useRef(0);
   const velocityRef = useRef(0);
@@ -203,103 +203,134 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const startSpin = () => {
     if (participants.length === 0) return;
 
-    // Скорость в зависимости от настройки
-    const speedSettings = {
-      fast: { base: 0.3, random: 0.2, friction: 0.985 },
-      medium: { base: 0.1, random: 0.066, friction: 0.990 },
-      slow: { base: 0.05, random: 0.033, friction: 0.992 }
-    };
-    
-    const settings = speedSettings[wheelSpeed] || speedSettings.fast;
-    
-    // Начальная скорость
-    velocityRef.current = settings.base + Math.random() * settings.random;
-    
-    // Сохраняем коэффициент трения для анимации
-    velocityRef.friction = settings.friction;
-
-    animate();
-  };
-
-  const animate = () => {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket disconnected during animation');
-      setError(true);
-      velocityRef.current = 0;
-      return;
-    }
-    
-    velocityRef.current *= velocityRef.friction || 0.985;
-    angleRef.current += velocityRef.current;
-    
-    drawWheel();
-    updateCurrentParticipant();
-
-    if (velocityRef.current > 0.001) {
-      animationRef.current = requestAnimationFrame(animate);
-    } else {
-      // Колесо остановилось
-      velocityRef.current = 0;
-      animationRef.current = null;
+    // Если есть целевой угол от сервера - используем его
+    if (targetAngle !== undefined && targetAngle !== null) {
+      // Анимация с точным углом
+      const startAngle = angleRef.current;
+      const startTime = Date.now();
+      const duration = wheelSpeed === 'fast' ? 3000 : wheelSpeed === 'medium' ? 5000 : 7000;
       
-      if (!hasNotifiedRef.current && participants.length > 0 && currentPrize) {
-        hasNotifiedRef.current = true;
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
         
-        // Финальное обновление для точности
+        // Easing function (ease-out cubic)
+        const eased = 1 - Math.pow(1 - progress, 3);
+        
+        // Interpolate angle
+        angleRef.current = startAngle + (targetAngle - startAngle) * eased;
+        
         drawWheel();
         updateCurrentParticipant();
         
-        // Отправляем результат с задержкой для стабилизации
-        setTimeout(() => {
-          const winnerIndex = getCurrentSegmentIndex();
-          if (winnerIndex < 0 || winnerIndex >= participants.length) {
-            console.error('Invalid winner index:', winnerIndex);
-            return;
-          }
+        if (progress < 1) {
+          animationRef.current = requestAnimationFrame(animate);
+        } else {
+          // Точно устанавливаем финальный угол
+          angleRef.current = targetAngle;
+          drawWheel();
+          updateCurrentParticipant();
           
-          const winner = participants[winnerIndex];
-          
-          const now = Date.now();
-          const messageId = `${raffleId}_${currentPrize.position}_${now}`;
-            
-            // Проверяем, не отправляли ли уже это сообщение
-            if (processedMessagesRef.current.has(messageId) || isSendingRef.current) {
-              console.log('Skipping duplicate message:', messageId);
-              return;
-            }
-            
-            // Блокируем повторную отправку
-            isSendingRef.current = true;
-            processedMessagesRef.current.add(messageId);
-            
-            // Дополнительная проверка на текущий приз
-            if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
-              console.log('Prize mismatch, skipping notification');
-              return;
-            }
-          
-          lastNotificationTimeRef.current = now;
-          
-          console.log('Wheel stopped. Winner:', winner, 'Prize:', currentPrize);
-          
-          if (winner && socket && socket.readyState === WebSocket.OPEN) {
-            const message = {
-              type: 'winner_selected',
-              winner: winner,
-              position: currentPrize.position,
-              prize: currentPrize.prize,
-              timestamp: now,
-              messageId: messageId
-            };
-            console.log('Sending winner to server:', message);
-            socket.send(JSON.stringify(message));
-          }
-          setTimeout(() => { isSendingRef.current = false; }, 1000);
-          onComplete && onComplete(winner);
-        }, 500);
-      }
+          // Отправляем результат
+          handleSpinComplete();
+        }
+      };
+      
+      animate();
+    } else {
+      // Старая логика для обратной совместимости
+      const speedSettings = {
+        fast: { base: 0.3, random: 0.2, friction: 0.985 },
+        medium: { base: 0.1, random: 0.066, friction: 0.990 },
+        slow: { base: 0.05, random: 0.033, friction: 0.992 }
+      };
+      
+      const settings = speedSettings[wheelSpeed] || speedSettings.fast;
+      velocityRef.current = settings.base + Math.random() * settings.random;
+      velocityRef.friction = settings.friction;
+      
+      animateOld();
     }
   };
+
+  const handleSpinComplete = () => {
+    if (!hasNotifiedRef.current && participants.length > 0 && currentPrize) {
+      hasNotifiedRef.current = true;
+      
+      const winnerIndex = getCurrentSegmentIndex();
+      if (winnerIndex < 0 || winnerIndex >= participants.length) {
+        console.error('Invalid winner index:', winnerIndex);
+        return;
+      }
+      
+      const winner = participants[winnerIndex];
+      const now = Date.now();
+      const messageId = `${raffleId}_${currentPrize.position}_${now}`;
+      
+      if (processedMessagesRef.current.has(messageId) || isSendingRef.current) {
+        console.log('Skipping duplicate message:', messageId);
+        return;
+      }
+      
+      isSendingRef.current = true;
+      processedMessagesRef.current.add(messageId);
+      
+      if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
+        console.log('Prize mismatch, skipping notification');
+        return;
+      }
+      
+      console.log('Wheel stopped. Winner:', winner, 'Prize:', currentPrize);
+      
+      if (winner && socket && socket.readyState === WebSocket.OPEN) {
+        const message = {
+          type: 'winner_selected',
+          winner: winner,
+          position: currentPrize.position,
+          prize: currentPrize.prize,
+          timestamp: now,
+          messageId: messageId
+        };
+        console.log('Sending winner to server:', message);
+        socket.send(JSON.stringify(message));
+      }
+      
+      setTimeout(() => { isSendingRef.current = false; }, 1000);
+      onComplete && onComplete(winner);
+    }
+  };
+
+  const animateOld = () => {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    console.error('WebSocket disconnected during animation');
+    setError(true);
+    velocityRef.current = 0;
+    return;
+  }
+  
+  velocityRef.current *= velocityRef.friction || 0.985;
+  angleRef.current += velocityRef.current;
+  
+  drawWheel();
+  updateCurrentParticipant();
+
+  if (velocityRef.current > 0.001) {
+    animationRef.current = requestAnimationFrame(animateOld); // ИЗМЕНЕНО: animate -> animateOld
+  } else {
+    // Колесо остановилось
+    velocityRef.current = 0;
+    animationRef.current = null;
+    
+    // Финальное обновление для точности
+    drawWheel();
+    updateCurrentParticipant();
+    
+    // Отправляем результат с задержкой для стабилизации
+    setTimeout(() => {
+      handleSpinComplete(); // ИЗМЕНЕНО: вызываем новую функцию вместо всей логики
+    }, 500);
+  }
+};
 
   return (
     <div className="relative flex flex-col items-center">
