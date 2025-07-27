@@ -9,13 +9,16 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const [error, setError] = useState(false);
   const lastNotificationTimeRef = useRef(0);
   const currentPrizeRef = useRef(null); // НОВОЕ: отслеживаем текущий приз
-  
+  const processedMessagesRef = useRef(new Set()); // Кеш обработанных сообщений
+  const isSendingRef = useRef(false); // Флаг отправки
   // НОВОЕ: Сброс состояния при смене приза
   useEffect(() => {
     if (currentPrize && currentPrize !== currentPrizeRef.current) {
       currentPrizeRef.current = currentPrize;
       hasNotifiedRef.current = false;
       lastNotificationTimeRef.current = 0;
+      processedMessagesRef.current.clear(); // Очищаем кеш
+      isSendingRef.current = false;
       setError(false);
       console.log('Reset notification state for new prize:', currentPrize);
     }
@@ -63,31 +66,32 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
   const getCurrentSegmentIndex = () => {
   if (participants.length === 0) return -1;
 
-  // Нормализуем угол колеса в диапазоне [0, 2π)
-  const normalized = ((angleRef.current % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-
-  // Стрелка находится сверху (3π/2 или 270°)
-  // Колесо рисуется от 0 радиан по часовой стрелке
-  // Но вращается против часовой стрелки (положительный angleRef.current)
-  
-  // Вычисляем, какой сегмент под стрелкой
-  // Стрелка указывает на угол 3π/2 (270°)
-  const segmentAngle = (2 * Math.PI) / participants.length;
-  
-  // Угол от начала первого сегмента до стрелки с учетом вращения
-  const angleFromStart = (3 * Math.PI / 2 - normalized + 2 * Math.PI) % (2 * Math.PI);
-  
-  // Индекс сегмента
-  const index = Math.floor(angleFromStart / segmentAngle) % participants.length;
+      // Нормализуем угол в диапазоне [0, 2π)
+    let normalized = angleRef.current % (2 * Math.PI);
+      if (normalized < 0) normalized += 2 * Math.PI;
+      
+      const segmentAngle = (2 * Math.PI) / participants.length;
+      
+      // Стрелка сверху (270° = 3π/2)
+      // Первый сегмент начинается с 0°, идёт по часовой
+      // При вращении колеса против часовой (положительный angle), сегменты "едут" против часовой
+      
+      // Какой сегмент под стрелкой = стрелка (270°) минус текущий поворот
+      let angleUnderPointer = (3 * Math.PI / 2 - normalized) % (2 * Math.PI);
+      if (angleUnderPointer < 0) angleUnderPointer += 2 * Math.PI;
+      
+      // Индекс сегмента
+      const index = Math.floor(angleUnderPointer / segmentAngle);
   
   // Логирование для отладки
   console.log('Angle calculation:', {
     rawAngle: angleRef.current,
     normalized,
-    angleFromStart,
+    angleUnderPointer,
     segmentAngle,
     calculatedIndex: index,
-    participant: participants[index]
+    participantId: participants[index]?.id,
+    participantName: participants[index]?.username
   });
   
   return index;
@@ -255,20 +259,24 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
           
           const winner = participants[winnerIndex];
           
-          // Защита от множественных отправок
           const now = Date.now();
-          const timeSinceLastNotification = now - lastNotificationTimeRef.current;
-          
-          if (timeSinceLastNotification < 2000) { // 2 секунды минимум между отправками
-            console.log('Skipping duplicate notification, time since last:', timeSinceLastNotification);
-            return;
-          }
-          
-          // Дополнительная проверка на текущий приз
-          if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
-            console.log('Prize mismatch, skipping notification');
-            return;
-          }
+          const messageId = `${raffleId}_${currentPrize.position}_${now}`;
+            
+            // Проверяем, не отправляли ли уже это сообщение
+            if (processedMessagesRef.current.has(messageId) || isSendingRef.current) {
+              console.log('Skipping duplicate message:', messageId);
+              return;
+            }
+            
+            // Блокируем повторную отправку
+            isSendingRef.current = true;
+            processedMessagesRef.current.add(messageId);
+            
+            // Дополнительная проверка на текущий приз
+            if (!currentPrize || currentPrize.position !== currentPrizeRef.current?.position) {
+              console.log('Prize mismatch, skipping notification');
+              return;
+            }
           
           lastNotificationTimeRef.current = now;
           
@@ -281,12 +289,12 @@ const WheelComponent = ({ participants, isSpinning, onComplete, currentPrize, so
               position: currentPrize.position,
               prize: currentPrize.prize,
               timestamp: now,
-              messageId: `${raffleId}_${currentPrize.position}_${now}`
+              messageId: messageId
             };
             console.log('Sending winner to server:', message);
             socket.send(JSON.stringify(message));
           }
-          
+          setTimeout(() => { isSendingRef.current = false; }, 1000);
           onComplete && onComplete(winner);
         }, 500);
       }

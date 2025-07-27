@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Глобальный словарь для отслеживания состояния розыгрышей
 raffle_states = {}
-
+processed_messages = {}
 async def run_wheel(raffle_id: int, db: AsyncSession):
     """Run the raffle wheel animation"""
     try:
@@ -110,14 +110,24 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                         "first_name": participant.first_name,
                         "last_name": participant.last_name
                     })
+            # Выбираем победителя на сервере
+            winner_index = random.randint(0, len(wheel_participants) - 1)
+            winner_id = wheel_participants[winner_index]['id']
             
+            # Сохраняем в состоянии
+            state['predetermined_winner'] = {
+                'index': winner_index,
+                'id': winner_id,
+                'position': int(position)
+            }
             # Send wheel data
             await manager.broadcast({
                 "type": "wheel_start",
                 "position": int(position),
                 "prize": raffle.prizes[position],
                 "participants": wheel_participants,
-                "participant_order": [p["id"] for p in wheel_participants]  # Явный порядок
+                "participant_order": [p["id"] for p in wheel_participants],
+                "target_winner_index": winner_index  # Индекс победителя  
             }, raffle_id)
             
             logger.info(f"Started wheel for position {position}, waiting for result...")
@@ -192,12 +202,17 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
     """Handle winner selection from frontend. Returns True if successful."""
     try:
+                # Проверяем messageId для идемпотентности
+        message_id = winner_data.get('messageId')
+        if message_id and message_id in processed_messages.get(raffle_id, set()):
+            logger.info(f"Duplicate message {message_id} ignored")
+            return False
         logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
         
         # Проверяем состояние розыгрыша
         state = raffle_states.get(raffle_id)
         if not state:
-            logger.warning(f"No state found for raffle {raffle_id}")
+            logger.error(f"No state found for raffle {raffle_id}")
             return False
             
         # Проверяем, что это правильная позиция
@@ -273,7 +288,11 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
                 "winner": winner_data,
                 "prize": prize
             }, raffle_id)
-            
+            # Сохраняем messageId в кеш
+            if message_id:
+                if raffle_id not in processed_messages:
+                    processed_messages[raffle_id] = set()
+                processed_messages[raffle_id].add(message_id)
             logger.info(f"Winner confirmed for position {position}: {winner_data.get('username', 'Unknown')}")
             return True
                 
@@ -311,7 +330,8 @@ async def finalize_raffle(db: AsyncSession, raffle_id: int):
             # Clear state
             if raffle_id in raffle_states:
                 del raffle_states[raffle_id]
-            
+                if raffle_id in processed_messages:
+                    del processed_messages[raffle_id]
             # Get all winners for final broadcast
             winners_result = await db.execute(
                 select(Winner, User).join(User).where(
@@ -373,7 +393,13 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
         
         while True:
             # Keep connection alive
-            data = await websocket.receive_text()
+            try:
+                data = await websocket.receive_text()
+            except WebSocketDisconnect:
+                raise  # Пробрасываем для обработки снаружи
+            except Exception as e:
+                logger.debug(f"WebSocket receive error: {e}")
+                break
             
             # Handle messages from frontend
             try:

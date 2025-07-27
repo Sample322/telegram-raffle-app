@@ -12,7 +12,10 @@ const RaffleCard = ({ raffle }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkParticipation();
+    // Проверяем участие только если есть авторизация
+    if (window.Telegram?.WebApp?.initData) {
+      checkParticipation();
+    }
   }, [raffle.id]);
 
   const checkParticipation = async () => {

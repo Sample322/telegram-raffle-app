@@ -2,7 +2,7 @@ import asyncio
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
-
+import os
 from ..services.telegram import TelegramService
 from ..database import async_session_maker
 from ..models import User, Raffle, Participant

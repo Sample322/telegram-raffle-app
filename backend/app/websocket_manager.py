@@ -1,6 +1,7 @@
 from fastapi import WebSocket
 from typing import Dict, List
-
+import logging
+logger = logging.getLogger(__name__)
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, List[WebSocket]] = {}
@@ -23,7 +24,10 @@ class ConnectionManager:
             for connection in self.active_connections[raffle_id]:
                 try:
                     await connection.send_json(message)
-                except:
+                except Exception as e:
+                    # Игнорируем ошибки закрытых соединений
+                    if "ConnectionClosedOK" not in str(type(e).__name__):
+                        logger.debug(f"Broadcast error: {e}")
                     disconnected.append(connection)
             
             # Remove disconnected clients
