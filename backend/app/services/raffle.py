@@ -89,8 +89,8 @@ class RaffleService:
             
             # Start the wheel
             async with async_session_maker() as db:
-                # Import here to avoid circular import
-                from ..routers.websocket import RaffleWheel
+                # Импортируем функцию правильно
+                from ..routers.websocket import run_wheel
                 
                 # Check if raffle is still active
                 result = await db.execute(
@@ -100,7 +100,6 @@ class RaffleService:
                 
                 if raffle and not raffle.is_completed:
                     logger.info(f"Starting wheel for raffle {raffle_id}")
-                    from ..routers.websocket import run_wheel
                     await run_wheel(raffle_id, db)
                     
         except Exception as e:
