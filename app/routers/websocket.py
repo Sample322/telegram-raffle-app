@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 import asyncio
 import random
 import json
+import math
 from typing import List, Dict
 from datetime import datetime
 import logging
@@ -110,15 +111,27 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                         "first_name": participant.first_name,
                         "last_name": participant.last_name
                     })
-            # Выбираем победителя на сервере
             winner_index = random.randint(0, len(wheel_participants) - 1)
             winner_id = wheel_participants[winner_index]['id']
+            
+            # Рассчитываем точный угол для остановки
+            # Колесо вращается против часовой, стрелка сверху (270°)
+            segment_angle = (2 * math.pi) / len(wheel_participants)
+            # Центр сегмента победителя
+            target_angle = winner_index * segment_angle + segment_angle / 2
+            # Добавляем случайное смещение для естественности (±10% от размера сегмента)
+            offset = (random.random() - 0.5) * segment_angle * 0.2
+            target_angle += offset
+            # Добавляем несколько полных оборотов для красоты
+            full_rotations = random.randint(4, 8)
+            target_angle += full_rotations * 2 * math.pi
             
             # Сохраняем в состоянии
             state['predetermined_winner'] = {
                 'index': winner_index,
                 'id': winner_id,
-                'position': int(position)
+                'position': int(position),
+                'angle': target_angle
             }
             # Send wheel data
             await manager.broadcast({
@@ -127,7 +140,8 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 "prize": raffle.prizes[position],
                 "participants": wheel_participants,
                 "participant_order": [p["id"] for p in wheel_participants],
-                "target_winner_index": winner_index  # Индекс победителя  
+                "target_winner_index": winner_index,
+                "target_angle": target_angle  # Точный угол остановки
             }, raffle_id)
             
             logger.info(f"Started wheel for position {position}, waiting for result...")
@@ -200,6 +214,12 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             del raffle_states[raffle_id]
 
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
+    # Проверяем предопределённого победителя
+    predetermined = state.get('predetermined_winner')
+    if predetermined and predetermined['position'] == position:
+            if winner_data['id'] != predetermined['id']:
+                logger.warning(f"Winner mismatch: expected {predetermined['id']}, got {winner_data['id']}")
+                # Но всё равно продолжаем с тем, что прислал фронт для обратной совместимости
     """Handle winner selection from frontend. Returns True if successful."""
     try:
                 # Проверяем messageId для идемпотентности
