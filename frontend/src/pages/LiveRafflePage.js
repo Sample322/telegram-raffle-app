@@ -91,10 +91,8 @@ function LiveRafflePage() {
           break;
           
         case 'wheel_start':
-        // ВАЖНО: всегда используем порядок с бэкенда
           let orderedParticipants = [];
           if (data.participant_order && data.participant_order.length > 0) {
-            // Мапим по порядку с бэкенда
             orderedParticipants = data.participant_order.map(tid => {
               const participant = data.participants.find(p => p.id === tid);
               if (!participant) {
@@ -108,15 +106,17 @@ function LiveRafflePage() {
           }
           
           console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
+          console.log('Target angle from server:', data.target_angle);
         
-        setCurrentRound({
-          position: data.position,
-          prize: data.prize,
-          participants: orderedParticipants  // Используем упорядоченных участников
-        });
-        setIsSpinning(true);
-        toast(`🎰 Разыгрывается ${data.position} место!`);
-        break;
+          setCurrentRound({
+            position: data.position,
+            prize: data.prize,
+            participants: orderedParticipants,
+            targetAngle: data.target_angle  // Сохраняем целевой угол
+          });
+          setIsSpinning(true);
+          toast(`🎰 Разыгрывается ${data.position} место!`);
+          break;
          
         case 'winner_confirmed':
           setWinners(prev => {
@@ -306,7 +306,8 @@ function LiveRafflePage() {
                   currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
                   socket={socket}
                   raffleId={id}
-                  wheelSpeed={raffle?.wheel_speed || 'fast'}  // ЭТА СТРОКА ДОЛЖНА БЫТЬ
+                  wheelSpeed={raffle?.wheel_speed || 'fast'}
+                  targetAngle={currentRound?.targetAngle}  // Передаём целевой угол
                   onComplete={(winner) => console.log('Winner selected:', winner)}
                 />
               ) : (

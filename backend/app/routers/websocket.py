@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 import asyncio
 import random
 import json
+import math
 from typing import List, Dict
 from datetime import datetime
 import logging
@@ -110,15 +111,27 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                         "first_name": participant.first_name,
                         "last_name": participant.last_name
                     })
-            # Выбираем победителя на сервере
             winner_index = random.randint(0, len(wheel_participants) - 1)
             winner_id = wheel_participants[winner_index]['id']
+            
+            # Рассчитываем точный угол для остановки
+            # Колесо вращается против часовой, стрелка сверху (270°)
+            segment_angle = (2 * math.pi) / len(wheel_participants)
+            # Центр сегмента победителя
+            target_angle = winner_index * segment_angle + segment_angle / 2
+            # Добавляем случайное смещение для естественности (±10% от размера сегмента)
+            offset = (random.random() - 0.5) * segment_angle * 0.2
+            target_angle += offset
+            # Добавляем несколько полных оборотов для красоты
+            full_rotations = random.randint(4, 8)
+            target_angle += full_rotations * 2 * math.pi
             
             # Сохраняем в состоянии
             state['predetermined_winner'] = {
                 'index': winner_index,
                 'id': winner_id,
-                'position': int(position)
+                'position': int(position),
+                'angle': target_angle
             }
             # Send wheel data
             await manager.broadcast({
@@ -127,7 +140,8 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 "prize": raffle.prizes[position],
                 "participants": wheel_participants,
                 "participant_order": [p["id"] for p in wheel_participants],
-                "target_winner_index": winner_index  # Индекс победителя  
+                "target_winner_index": winner_index,
+                "target_angle": target_angle  # Точный угол остановки
             }, raffle_id)
             
             logger.info(f"Started wheel for position {position}, waiting for result...")
@@ -202,24 +216,34 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
     """Handle winner selection from frontend. Returns True if successful."""
     try:
-                # Проверяем messageId для идемпотентности
-        message_id = winner_data.get('messageId')
-        if message_id and message_id in processed_messages.get(raffle_id, set()):
-            logger.info(f"Duplicate message {message_id} ignored")
-            return False
-        logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
-        
-        # Проверяем состояние розыгрыша
+        # Получаем состояние розыгрыша В НАЧАЛЕ функции
         state = raffle_states.get(raffle_id)
         if not state:
             logger.error(f"No state found for raffle {raffle_id}")
             return False
             
+        # Проверяем messageId для идемпотентности
+        message_id = winner_data.get('messageId')
+        if message_id and message_id in processed_messages.get(raffle_id, set()):
+            logger.info(f"Duplicate message {message_id} ignored")
+            return False
+            
+        # Проверяем предопределённого победителя
+        predetermined = state.get('predetermined_winner')
+        if predetermined and predetermined['position'] == position:
+            if winner_data['id'] != predetermined['id']:
+                logger.warning(f"Winner mismatch: expected {predetermined['id']}, got {winner_data['id']}")
+                # Но всё равно продолжаем с тем, что прислал фронт для обратной совместимости
+                
+        logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
+        
         # Проверяем, что это правильная позиция
         current_round = state.get('current_round')
         if not current_round or current_round['position'] != position:
             logger.warning(f"Position mismatch: expected {current_round}, got {position}")
             return False
+        
+        # ... остальной код функции остается без изменений ...
         
         # Проверяем, не обработан ли уже этот раунд
         if position in state.get('completed_positions', set()):
