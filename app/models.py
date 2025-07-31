@@ -7,7 +7,6 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(BigInteger, unique=True, index=True)  # Изменено на BigInteger
     username = Column(String)
     first_name = Column(String)
@@ -71,7 +70,6 @@ class Winner(Base):
 class Admin(Base):
     __tablename__ = "admins"
     
-    id = Column(Integer, primary_key=True, index=True)
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(BigInteger, unique=True, index=True)  # Изменено на BigInteger
     username = Column(String)

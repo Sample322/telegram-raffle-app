@@ -334,10 +334,16 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
                 
         except Exception as e:
             await db.rollback()
+            # отправляем сообщение об ошибке всем клиентам этого розыгрыша
+            await manager.broadcast({
+                "type": "error",
+                "message": f"Ошибка сохранения победителя: {e}"
+            }, raffle_id)
             logger.exception(f"Error in transaction: {e}")
-            # При ошибке все равно сбрасываем флаг ожидания
+            # При ошибке всё равно сбрасываем флаг ожидания
             state['waiting_for_result'] = False
             return False
+
                 
     except Exception as e:
         logger.exception(f"Error handling winner selection: {e}")
