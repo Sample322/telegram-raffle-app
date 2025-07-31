@@ -56,8 +56,13 @@ function LiveRafflePage() {
   };
 
   const connectWebSocket = () => {
-    const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
-    console.log('Connecting to WebSocket:', wsUrl);
+  // Убедитесь что используется правильный протокол и путь
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = process.env.REACT_APP_WS_URL 
+    ? `${process.env.REACT_APP_WS_URL}/api/ws/${id}`
+    : `${protocol}//${window.location.host}/api/ws/${id}`;
+    
+  console.log('Connecting to WebSocket:', wsUrl);
     
     const ws = new WebSocket(wsUrl);
 
