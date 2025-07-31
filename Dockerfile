@@ -15,18 +15,18 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Проверка что build создался
-RUN ls -la /app/build && \
-    echo "Build size:" && \
-    du -sh /app/build
-
 # Production stage
 FROM nginx:alpine
+
+# Remove default nginx config
+RUN rm -rf /etc/nginx/conf.d/default.conf
+
+# Copy custom nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy built React app
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Проверка что файлы скопировались
-RUN ls -la /usr/share/nginx/html && \
-    echo "HTML size:" && \
-    du -sh /usr/share/nginx/html
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
