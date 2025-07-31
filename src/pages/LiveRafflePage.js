@@ -169,8 +169,13 @@ function LiveRafflePage() {
           break;
           
         case 'error':
-          toast.error(data.message);
+          // останавливаем вращение и очищаем текущий раунд
+          setIsSpinning(false);
+          setCurrentRound(null);
+          setConnectionStatus('error'); // при желании можно отобразить статус "ошибка"
+          toast.error(data.message || 'Произошла ошибка');
           break;
+
           
         default:
           break;
