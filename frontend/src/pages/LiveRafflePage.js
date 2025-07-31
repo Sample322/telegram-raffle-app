@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
-import SlotReelComponent from '../components/SlotReelComponent';
+import WheelComponent from '../components/WheelComponent';
 import { toast } from 'react-hot-toast';
 
 function LiveRafflePage() {
@@ -56,13 +56,8 @@ function LiveRafflePage() {
   };
 
   const connectWebSocket = () => {
-  // Убедитесь что используется правильный протокол и путь
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = process.env.REACT_APP_WS_URL 
-    ? `${process.env.REACT_APP_WS_URL}/api/ws/${id}`
-    : `${protocol}//${window.location.host}/api/ws/${id}`;
-    
-  console.log('Connecting to WebSocket:', wsUrl);
+    const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
+    console.log('Connecting to WebSocket:', wsUrl);
     
     const ws = new WebSocket(wsUrl);
 
@@ -110,14 +105,14 @@ function LiveRafflePage() {
             orderedParticipants = data.participants;
           }
           
-          console.log('Slot participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
-          console.log('Target offset from server:', data.target_offset);
-
+          console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
+          console.log('Target angle from server:', data.target_angle);
+        
           setCurrentRound({
             position: data.position,
             prize: data.prize,
             participants: orderedParticipants,
-            targetOffset: data.target_offset  // Изменено с targetAngle
+            targetAngle: data.target_angle  // Сохраняем целевой угол
           });
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
@@ -301,33 +296,33 @@ function LiveRafflePage() {
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Slot Machine Section */}
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg p-8 shadow-2xl">
-                {wheelParticipants.length > 0 ? (
-                  <SlotReelComponent
-                    participants={wheelParticipants}
-                    isSpinning={isSpinning}
-                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                    socket={socket}
-                    raffleId={id}
-                    wheelSpeed={raffle?.wheel_speed || 'fast'}
-                    targetOffset={currentRound?.targetOffset}  // Изменено с targetAngle
-                    onComplete={(winner) => console.log('Winner selected:', winner)}
-                  />
-                ) : (
-                  <div className="text-center text-gray-600 py-20">
-                    <p className="text-xl mb-4">Ожидание участников...</p>
-                    <p>Текущее количество участников: {participants.length}</p>
-                    {participants.length < Object.keys(raffle.prizes).length && (
-                      <p className="text-sm text-red-600 mt-2">
-                        Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+          {/* Wheel Section */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg p-8 shadow-2xl">
+              {wheelParticipants.length > 0 ? (
+                <WheelComponent
+                  participants={wheelParticipants}
+                  isSpinning={isSpinning}
+                  currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                  socket={socket}
+                  raffleId={id}
+                  wheelSpeed={raffle?.wheel_speed || 'fast'}
+                  targetAngle={currentRound?.targetAngle}  // Передаём целевой угол
+                  onComplete={(winner) => console.log('Winner selected:', winner)}
+                />
+              ) : (
+                <div className="text-center text-gray-600 py-20">
+                  <p className="text-xl mb-4">Ожидание участников...</p>
+                  <p>Текущее количество участников: {participants.length}</p>
+                  {participants.length < Object.keys(raffle.prizes).length && (
+                    <p className="text-sm text-red-600 mt-2">
+                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
+          </div>
 
           {/* Winners Table */}
           <div className="bg-white/10 backdrop-blur rounded-lg p-6">

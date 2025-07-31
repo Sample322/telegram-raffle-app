@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey, Float, BigInteger, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey, Float, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -54,14 +54,11 @@ class Participant(Base):
 
 class Winner(Base):
     __tablename__ = "winners"
-    __table_args__ = (
-        UniqueConstraint('raffle_id', 'position', name='_raffle_position_uc'),
-    )
     
     id = Column(Integer, primary_key=True, index=True)
     raffle_id = Column(Integer, ForeignKey("raffles.id"))
     user_id = Column(Integer, ForeignKey("users.id"))
-    position = Column(Integer)
+    position = Column(Integer)  # 1st, 2nd, 3rd place etc
     prize = Column(String)
     won_at = Column(DateTime(timezone=True), server_default=func.now())
     
