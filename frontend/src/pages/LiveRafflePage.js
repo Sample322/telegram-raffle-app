@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
-import WheelComponent from '../components/WheelComponent';
+import SlotReelComponent from '../components/SlotReelComponent';
 import { toast } from 'react-hot-toast';
 
 function LiveRafflePage() {
@@ -105,14 +105,14 @@ function LiveRafflePage() {
             orderedParticipants = data.participants;
           }
           
-          console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
-          console.log('Target angle from server:', data.target_angle);
-        
+          console.log('Slot participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
+          console.log('Target offset from server:', data.target_offset);
+
           setCurrentRound({
             position: data.position,
             prize: data.prize,
             participants: orderedParticipants,
-            targetAngle: data.target_angle  // Сохраняем целевой угол
+            targetOffset: data.target_offset  // Изменено с targetAngle
           });
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
@@ -296,33 +296,33 @@ function LiveRafflePage() {
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Wheel Section */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg p-8 shadow-2xl">
-              {wheelParticipants.length > 0 ? (
-                <WheelComponent
-                  participants={wheelParticipants}
-                  isSpinning={isSpinning}
-                  currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                  socket={socket}
-                  raffleId={id}
-                  wheelSpeed={raffle?.wheel_speed || 'fast'}
-                  targetAngle={currentRound?.targetAngle}  // Передаём целевой угол
-                  onComplete={(winner) => console.log('Winner selected:', winner)}
-                />
-              ) : (
-                <div className="text-center text-gray-600 py-20">
-                  <p className="text-xl mb-4">Ожидание участников...</p>
-                  <p>Текущее количество участников: {participants.length}</p>
-                  {participants.length < Object.keys(raffle.prizes).length && (
-                    <p className="text-sm text-red-600 mt-2">
-                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
-                    </p>
-                  )}
-                </div>
-              )}
+          {/* Slot Machine Section */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-lg p-8 shadow-2xl">
+                {wheelParticipants.length > 0 ? (
+                  <SlotReelComponent
+                    participants={wheelParticipants}
+                    isSpinning={isSpinning}
+                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                    socket={socket}
+                    raffleId={id}
+                    wheelSpeed={raffle?.wheel_speed || 'fast'}
+                    targetOffset={currentRound?.targetOffset}  // Изменено с targetAngle
+                    onComplete={(winner) => console.log('Winner selected:', winner)}
+                  />
+                ) : (
+                  <div className="text-center text-gray-600 py-20">
+                    <p className="text-xl mb-4">Ожидание участников...</p>
+                    <p>Текущее количество участников: {participants.length}</p>
+                    {participants.length < Object.keys(raffle.prizes).length && (
+                      <p className="text-sm text-red-600 mt-2">
+                        Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
           {/* Winners Table */}
           <div className="bg-white/10 backdrop-blur rounded-lg p-6">

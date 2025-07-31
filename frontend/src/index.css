@@ -203,3 +203,120 @@ input, textarea, select {
 input::placeholder, textarea::placeholder {
   color: #9ca3af;
 }
+
+/* Добавьте эти стили в frontend/src/index.css */
+
+/* Slot Machine Styles */
+.slot-machine-container {
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.slot-item {
+  will-change: transform, background-color, color;
+  transform: translateZ(0); /* Force GPU acceleration */
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+.slot-item.highlighted {
+  animation: slot-winner-pulse 0.5s ease-in-out;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  z-index: 10;
+}
+
+@keyframes slot-winner-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1.05);
+  }
+}
+
+/* Optimize scrollbar hiding */
+.slot-reel::-webkit-scrollbar {
+  display: none;
+}
+
+.slot-reel {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Performance optimizations */
+.slot-machine-container * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Reduce paint areas */
+.slot-machine-container .bg-gradient-to-b,
+.slot-machine-container .bg-gradient-to-t {
+  will-change: opacity;
+  contain: layout style;
+}
+
+/* Smooth transitions for state changes */
+.slot-item {
+  transition: 
+    background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Optimize for mobile */
+@media (max-width: 640px) {
+  .slot-machine-container {
+    max-width: 100%;
+  }
+  
+  .slot-item {
+    font-size: 14px;
+  }
+  
+  .slot-item.highlighted {
+    font-size: 18px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .slot-item {
+    border: 2px solid transparent;
+  }
+  
+  .slot-item.highlighted {
+    border-color: currentColor;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .slot-item {
+    transition: none;
+  }
+  
+  @keyframes slot-winner-pulse {
+    0%, 100% {
+      transform: scale(1.05);
+    }
+  }
+}
