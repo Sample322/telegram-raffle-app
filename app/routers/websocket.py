@@ -13,7 +13,6 @@ from ..models import Raffle, Participant, User, Winner
 from ..websocket_manager import manager
 from ..services.telegram import TelegramService
 from ..services.notifications import NotificationService
-from sqlalchemy.dialects.postgresql import insert
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -21,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Глобальный словарь для отслеживания состояния розыгрышей
 raffle_states = {}
 processed_messages = {}
-async def run_slot(raffle_id: int, db: AsyncSession):
-    """Run the raffle slot machine animation"""
+async def run_wheel(raffle_id: int, db: AsyncSession):
+    """Run the raffle wheel animation"""
     try:
         # Get raffle and participants
         raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
@@ -60,7 +59,7 @@ async def run_slot(raffle_id: int, db: AsyncSession):
             "waiting_for_result": False,
             "winners": [],
             "completed_positions": set(),
-            "participant_order": participant_order
+            "participant_order": participant_order  # НОВОЕ: сохраняем порядок
         }
         
         # Announce start
@@ -75,15 +74,13 @@ async def run_slot(raffle_id: int, db: AsyncSession):
         # Start from last place to first
         sorted_positions = sorted(raffle.prizes.keys(), key=lambda x: int(x), reverse=True)
         
-        # Константы для слот-машины
-        ITEM_HEIGHT = 60  # Должно совпадать с frontend
-        
         for position in sorted_positions:
             state = raffle_states.get(raffle_id)
             if not state:
                 logger.error(f"State lost for raffle {raffle_id}")
                 break
                 
+            # Проверяем, не была ли уже разыграна эта позиция
             if int(position) in state['completed_positions']:
                 logger.warning(f"Position {position} already completed, skipping")
                 continue
@@ -99,81 +96,79 @@ async def run_slot(raffle_id: int, db: AsyncSession):
             }
             state['waiting_for_result'] = True
             
-            # Prepare participant data for slot WITH CONSISTENT ORDER
-            slot_participants = []
+            # Prepare participant data for wheel WITH CONSISTENT ORDER
+            wheel_participants = []
+            # Используем только оставшихся участников, но сохраняем порядок из participant_order
             remaining_ids = {p.telegram_id for p in state['remaining_participants']}
             
             for tid in state['participant_order']:
                 if tid in remaining_ids:
+                    # Находим участника
                     participant = next(p for p in state['remaining_participants'] if p.telegram_id == tid)
-                    slot_participants.append({
+                    wheel_participants.append({
                         "id": participant.telegram_id,
                         "username": participant.username or f"{participant.first_name} {participant.last_name or ''}".strip(),
                         "first_name": participant.first_name,
                         "last_name": participant.last_name
                     })
+            winner_index = random.randint(0, len(wheel_participants) - 1)
+            winner_id = wheel_participants[winner_index]['id']
             
-            # Выбираем победителя
-            winner_index = random.randint(0, len(slot_participants) - 1)
-            winner_id = slot_participants[winner_index]['id']
-            
-            # Рассчитываем точную позицию остановки в пикселях
-            base_offset = winner_index * ITEM_HEIGHT
-            
-            # Добавляем случайное смещение (±10% от высоты элемента)
-            random_offset = random.uniform(-0.1, 0.1) * ITEM_HEIGHT
-            target_offset = base_offset + random_offset
-            
-            # Убеждаемся, что offset в пределах
-            target_offset = max(0, min(target_offset, (len(slot_participants) - 1) * ITEM_HEIGHT))
+            # Рассчитываем точный угол для остановки
+            # Колесо вращается против часовой, стрелка сверху (270°)
+            segment_angle = (2 * math.pi) / len(wheel_participants)
+            # Центр сегмента победителя
+            target_angle = winner_index * segment_angle + segment_angle / 2
+            # Добавляем случайное смещение для естественности (±10% от размера сегмента)
+            offset = (random.random() - 0.5) * segment_angle * 0.2
+            target_angle += offset
+            # Добавляем несколько полных оборотов для красоты
+            full_rotations = random.randint(4, 8)
+            target_angle += full_rotations * 2 * math.pi
             
             # Сохраняем в состоянии
             state['predetermined_winner'] = {
                 'index': winner_index,
                 'id': winner_id,
                 'position': int(position),
-                'offset': target_offset
+                'angle': target_angle
             }
-            
-            # Send slot data
+            # Send wheel data
             await manager.broadcast({
-                "type": "wheel_start",  # Оставляем тот же тип для совместимости
+                "type": "wheel_start",
                 "position": int(position),
                 "prize": raffle.prizes[position],
-                "participants": slot_participants,
-                "participant_order": [p["id"] for p in slot_participants],
+                "participants": wheel_participants,
+                "participant_order": [p["id"] for p in wheel_participants],
                 "target_winner_index": winner_index,
-                "target_offset": target_offset  # Вместо target_angle
+                "target_angle": target_angle  # Точный угол остановки
             }, raffle_id)
             
-            logger.info(f"Started slot for position {position}, target offset: {target_offset}px, waiting for result...")
+            logger.info(f"Started wheel for position {position}, waiting for result...")
             
-            # Ждем результат от фронтенда
-            timeout = 60
+            # Ждем результат от фронтенда с увеличенным таймаутом
+            timeout = 60  # 60 секунд
             waited = 0
             while state.get('waiting_for_result', False) and waited < timeout:
                 await asyncio.sleep(0.5)
                 waited += 0.5
                 
+                # Проверяем, не потеряли ли мы состояние
                 if raffle_id not in raffle_states:
                     logger.error(f"State lost during waiting for raffle {raffle_id}")
                     return
             
             if waited >= timeout:
-                logger.error(f"Timeout waiting for slot result for position {position}")
+                logger.error(f"Timeout waiting for wheel result for position {position}")
                 
-                # При таймауте выбираем предопределенного победителя
-                if state['remaining_participants'] and 'predetermined_winner' in state:
-                    predetermined = state['predetermined_winner']
-                    winner_participant = next(
-                        p for p in state['remaining_participants'] 
-                        if p.telegram_id == predetermined['id']
-                    )
+                # При таймауте выбираем случайного победителя
+                if state['remaining_participants']:
+                    random_winner = random.choice(state['remaining_participants'])
                     winner_data = {
-                        "id": winner_participant.telegram_id,
-                        "username": winner_participant.username,
-                        "first_name": winner_participant.first_name,
-                        "last_name": winner_participant.last_name
+                        "id": random_winner.telegram_id,
+                        "username": random_winner.username,
+                        "first_name": random_winner.first_name,
+                        "last_name": random_winner.last_name
                     }
                     
                     # Сохраняем победителя
@@ -210,7 +205,7 @@ async def run_slot(raffle_id: int, db: AsyncSession):
         await finalize_raffle(db, raffle_id)
         
     except Exception as e:
-        logger.exception(f"Error running slot for raffle {raffle_id}")
+        logger.exception(f"Error running wheel for raffle {raffle_id}")
         await manager.broadcast({
             "type": "error",
             "message": "Произошла ошибка при проведении розыгрыша"
@@ -218,11 +213,10 @@ async def run_slot(raffle_id: int, db: AsyncSession):
         if raffle_id in raffle_states:
             del raffle_states[raffle_id]
 
-
 async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
     """Handle winner selection from frontend. Returns True if successful."""
     try:
-        # Получаем состояние розыгрыша
+        # Получаем состояние розыгрыша В НАЧАЛЕ функции
         state = raffle_states.get(raffle_id)
         if not state:
             logger.error(f"No state found for raffle {raffle_id}")
@@ -239,18 +233,7 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
         if predetermined and predetermined['position'] == position:
             if winner_data['id'] != predetermined['id']:
                 logger.warning(f"Winner mismatch: expected {predetermined['id']}, got {winner_data['id']}")
-                # Используем предопределенного победителя для консистентности
-                winner_id = predetermined['id']
-                # Находим правильные данные победителя
-                for p in state['participants']:
-                    if p.telegram_id == winner_id:
-                        winner_data = {
-                            "id": p.telegram_id,
-                            "username": p.username,
-                            "first_name": p.first_name,
-                            "last_name": p.last_name
-                        }
-                        break
+                # Но всё равно продолжаем с тем, что прислал фронт для обратной совместимости
                 
         logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
         
@@ -259,6 +242,8 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
         if not current_round or current_round['position'] != position:
             logger.warning(f"Position mismatch: expected {current_round}, got {position}")
             return False
+        
+        # ... остальной код функции остается без изменений ...
         
         # Проверяем, не обработан ли уже этот раунд
         if position in state.get('completed_positions', set()):
@@ -279,32 +264,37 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
             logger.error(f"User with telegram_id {winner_data['id']} not found")
             return False
         
+        # ВАЖНО: Используем ту же сессию db, а не создаем новую!
         try:
-            # Используем INSERT ... ON CONFLICT для идемпотентности
-            stmt = insert(Winner).values(
+            # Проверяем с блокировкой
+            existing_winner = await db.execute(
+                select(Winner).where(
+                    Winner.raffle_id == raffle_id,
+                    Winner.position == position
+                ).with_for_update()
+            )
+            
+            if existing_winner.scalar_one_or_none():
+                logger.warning(f"Winner already exists for position {position} in raffle {raffle_id}")
+                # Все равно обновляем состояние, чтобы не застрять
+                state['waiting_for_result'] = False
+                state['completed_positions'].add(position)
+                return False
+            
+            # Создаем победителя
+            winner_record = Winner(
                 raffle_id=raffle_id,
                 user_id=user.id,
                 position=position,
-                prize=prize,
-                won_at=datetime.utcnow()
+                prize=prize
             )
+            db.add(winner_record)
             
-            # При конфликте обновляем временную метку (для логирования попыток)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=['raffle_id', 'position'],
-                set_=dict(won_at=datetime.utcnow())
-            )
-            
-            result = await db.execute(stmt)
+            # Сначала коммитим транзакцию
             await db.commit()
+            logger.info(f"Winner saved to database for position {position}")
             
-            # Проверяем, была ли это вставка или обновление
-            if result.rowcount > 0:
-                logger.info(f"Winner saved/updated for position {position}")
-            else:
-                logger.warning(f"No changes made for position {position} (possible duplicate)")
-            
-            # В любом случае обновляем состояние
+            # ТОЛЬКО ПОСЛЕ успешного коммита обновляем состояние
             state['waiting_for_result'] = False
             state['completed_positions'].add(position)
             state['winners'].append(winner_data)
@@ -322,28 +312,20 @@ async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: 
                 "winner": winner_data,
                 "prize": prize
             }, raffle_id)
-            
             # Сохраняем messageId в кеш
             if message_id:
                 if raffle_id not in processed_messages:
                     processed_messages[raffle_id] = set()
                 processed_messages[raffle_id].add(message_id)
-            
             logger.info(f"Winner confirmed for position {position}: {winner_data.get('username', 'Unknown')}")
             return True
                 
         except Exception as e:
             await db.rollback()
-            # отправляем сообщение об ошибке всем клиентам этого розыгрыша
-            await manager.broadcast({
-                "type": "error",
-                "message": f"Ошибка сохранения победителя: {e}"
-            }, raffle_id)
             logger.exception(f"Error in transaction: {e}")
-            # При ошибке всё равно сбрасываем флаг ожидания
+            # При ошибке все равно сбрасываем флаг ожидания
             state['waiting_for_result'] = False
             return False
-
                 
     except Exception as e:
         logger.exception(f"Error handling winner selection: {e}")
@@ -369,13 +351,11 @@ async def finalize_raffle(db: AsyncSession, raffle_id: int):
             raffle.is_active = False
             await db.commit()
             
-            # Clear state AND message cache
+            # Clear state
             if raffle_id in raffle_states:
                 del raffle_states[raffle_id]
-            if raffle_id in processed_messages:
-                del processed_messages[raffle_id]
-                logger.info(f"Cleared message cache for raffle {raffle_id}")
-            
+                if raffle_id in processed_messages:
+                    del processed_messages[raffle_id]
             # Get all winners for final broadcast
             winners_result = await db.execute(
                 select(Winner, User).join(User).where(

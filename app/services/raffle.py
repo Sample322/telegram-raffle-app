@@ -3,7 +3,7 @@ from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
-from ..routers.websocket import run_slot
+
 from ..database import async_session_maker
 from ..models import Raffle, Participant, User
 from ..services.telegram import TelegramService
@@ -90,7 +90,7 @@ class RaffleService:
             # Start the wheel
             async with async_session_maker() as db:
                 # Импортируем функцию правильно
-                from ..routers.websocket import run_slot
+                from ..routers.websocket import run_wheel
                 
                 # Check if raffle is still active
                 result = await db.execute(
@@ -100,7 +100,7 @@ class RaffleService:
                 
                 if raffle and not raffle.is_completed:
                     logger.info(f"Starting wheel for raffle {raffle_id}")
-                    await run_slot(raffle_id, db)
+                    await run_wheel(raffle_id, db)
                     
         except Exception as e:
             logger.error(f"Error in wheel delay for raffle {raffle_id}: {e}")

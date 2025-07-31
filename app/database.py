@@ -6,7 +6,7 @@ import os
 import logging
 from fastapi import HTTPException
 from dotenv import load_dotenv
-from init_db_constraints import add_constraints
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,6 @@ async def init_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Database initialized successfully")
-        await add_constraints()
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         # Не падаем, продолжаем работу

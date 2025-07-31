@@ -76,18 +76,6 @@ async def create_raffle(
     await db.commit()
     await db.refresh(raffle)
     
-    # ДОБАВИТЬ: Проверка что розыгрыш создался
-    logger.info(f"Created raffle with ID: {raffle.id}")
-    
-    # ДОБАВИТЬ: Проверочный запрос
-    check_result = await db.execute(
-        select(Raffle).where(Raffle.id == raffle.id)
-    )
-    check_raffle = check_result.scalar_one_or_none()
-    
-    if not check_raffle:
-        logger.error(f"Raffle {raffle.id} not found after creation!")
-        raise HTTPException(status_code=500, detail="Raffle creation failed")
     # Постинг в каналы для публикации
     if raffle_data.post_channels:
         await post_to_channels(raffle, raffle_data.post_channels)
