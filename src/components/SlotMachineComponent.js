@@ -74,6 +74,10 @@ const SlotMachineComponent = ({
   const slotRef = useRef(null);
   const stripRef = useRef(null);
   const [currentHighlight, setCurrentHighlight] = useState(null);
+  // Keep a ref to the last highlighted participant id to avoid
+  // unnecessary state updates.  This helps prevent feedback loops when
+  // `updateHighlight` runs within animation frames.
+  const lastHighlightIdRef = useRef(null);
   const hasNotifiedRef = useRef(false);
   const currentPrizeRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
@@ -148,16 +152,17 @@ const SlotMachineComponent = ({
     // We do not call updateHighlight() here directly to avoid capturing a
     // stale closure.  Instead, the caller will invoke updateHighlight
     // explicitly after re-creating the strip.
-  }, [participants, wheelSpeed, itemWidth, updateHighlight]);
+  }, [participants, wheelSpeed, itemWidth]);
 
   // Initialise the strip when participants or the speed changes
 useEffect(() => {
     createParticipantStrip();
-    // Immediately compute the highlighted participant once the strip is
-    // created.  This ensures the displayed name stays in sync when the
-    // participant list changes (e.g. after a winner is removed).
-    updateHighlight();
-  }, [createParticipantStrip, updateHighlight]);
+    // Schedule a highlight update on the next animation frame so the DOM
+    // has been updated with the new strip contents.  Using
+    // `requestAnimationFrame` avoids calling updateHighlight before
+    // `gsap.set` has applied its transform.
+    requestAnimationFrame(() => updateHighlight());
+  }, [createParticipantStrip]);
 
   // Calculate and start the spin animation.  The duration and number of
   // revolutions depends on the selected speed.  Use the current item width
@@ -220,23 +225,20 @@ useEffect(() => {
   const updateHighlight = useCallback(() => {
     if (!stripRef.current) return;
     // Compute the index of the item currently under the central marker
-    // directly from the strip's translation.  This avoids inaccuracies
-    // caused by reading DOM bounding rectangles, which can become stale
-    // during smooth animations.  We add the centre offset so the index
-    // corresponds to the item aligned with the red marker.
     const currentX = -gsap.getProperty(stripRef.current, 'x');
     const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemWidth;
     const rawIndex = Math.round((currentX + centerOffset) / itemWidth);
-    // Wrap the index within the bounds of the participants array
     const len = participants.length;
     if (len === 0) return;
     let participantIndex = rawIndex % len;
     if (participantIndex < 0) participantIndex += len;
     const participant = participants[participantIndex];
-    if (participant && participant !== currentHighlight) {
+    // Avoid unnecessary state updates by comparing to the last highlighted id
+    if (participant && participant.id !== lastHighlightIdRef.current) {
+      lastHighlightIdRef.current = participant.id;
       setCurrentHighlight(participant);
     }
-  }, [participants, itemWidth, currentHighlight]);
+  }, [participants, itemWidth]);
 
   // After the spin completes, emit the winner to the backend via the WebSocket
   // and animate the winning item.  Guard against duplicate notifications
