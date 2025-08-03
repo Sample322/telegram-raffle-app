@@ -3,7 +3,8 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
+ENV WORKER_CONNECTIONS=2048
+ENV WORKER_RLIMIT_NOFILE=4096
 # Set work directory
 WORKDIR /app
 # Create uploads directory and set permissions
@@ -33,4 +34,4 @@ RUN mkdir -p uploads
 EXPOSE 8000
 
 # Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--limit-connections", "2000"]

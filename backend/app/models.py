@@ -36,7 +36,7 @@ class Raffle(Base):
     is_completed = Column(Boolean, default=False)
     draw_started = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+    display_type = Column(String, default="slot")
     participants = relationship("Participant", back_populates="raffle")
     winners = relationship("Winner", back_populates="raffle")
 
