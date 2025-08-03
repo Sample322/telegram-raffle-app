@@ -179,9 +179,11 @@ const SlotMachineComponent = ({
       );
   }, [participants, wheelSpeed, targetWinnerIndex, itemWidth]);
 
-  // Highlight the participant currently under the central marker.  This uses
-  // getBoundingClientRect() to find the centre of each item relative to the
-  // slot container.
+  // Highlight the participant currently under the central marker.  We no
+  // longer add an `.active` class to the slot items because changing the
+  // background colour and scaling of items caused distracting flashes and
+  // variable sizing.  Instead, we simply compute the closest item and store
+  // it in state for display above the machine.
   const updateHighlight = useCallback(() => {
     if (!stripRef.current) return;
     const containerRect = slotRef.current.getBoundingClientRect();
@@ -197,10 +199,8 @@ const SlotMachineComponent = ({
         minDistance = distance;
         closestItem = item;
       }
-      item.classList.remove('active');
     });
     if (closestItem && minDistance < itemWidth / 2) {
-      closestItem.classList.add('active');
       const participantId = parseInt(closestItem.dataset.participantId);
       const participant = participants.find((p) => p.id === participantId);
       setCurrentHighlight(participant);
@@ -246,14 +246,11 @@ const SlotMachineComponent = ({
             };
             console.log('Sending winner to server:', message);
             socket.send(JSON.stringify(message));
+            // Apply a CSS class to indicate the winner.  We intentionally
+            // avoid scaling the element here; scaling within a flex
+            // container can cause neighbouring elements to shrink.  The
+            // `.winner` class in CSS will add a glow effect instead.
             winnerElement.classList.add('winner');
-            gsap.to(winnerElement, {
-              scale: 1.2,
-              duration: 0.5,
-              yoyo: true,
-              repeat: 1,
-              ease: 'power2.inOut',
-            });
             setTimeout(() => {
               isSendingRef.current = false;
             }, 1000);
