@@ -117,10 +117,10 @@
   display: flex;
   height: 100%;
   align-items: center;
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  perspective: 1000px;
+  /* Intentionally omit GPU 3D transforms here.  They can cause
+   * overflowing content to leak outside of containers when combined
+   * with `overflow: hidden`.  Keeping the strip in 2D space ensures
+   * the overflow clipping behaves correctly. */
 }
 
 /* Individual participant item */

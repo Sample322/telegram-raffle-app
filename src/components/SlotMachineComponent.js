@@ -78,6 +78,13 @@ const SlotMachineComponent = ({
   // unnecessary state updates.  This helps prevent feedback loops when
   // `updateHighlight` runs within animation frames.
   const lastHighlightIdRef = useRef(null);
+
+  // Full size of a slot item (including margins) in pixels.  This value
+  // determines how far the strip moves for each item and is measured
+  // dynamically when the strip is created.  Without including the
+  // margins, calculations based on the container width can drift and the
+  // highlight will fall out of sync with the visible sector.
+  const [itemSize, setItemSize] = useState(0);
   const hasNotifiedRef = useRef(false);
   const currentPrizeRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
@@ -129,8 +136,6 @@ const SlotMachineComponent = ({
     duplicatedParticipants.forEach((participant, index) => {
       const item = document.createElement('div');
       item.className = 'slot-item';
-      // Store the participant id for later lookup.  Use data attributes so we
-      // don't need to attach React props to DOM nodes directly.
       item.dataset.participantId = participant.id;
       item.dataset.originalIndex = index % participants.length;
       const nameElement = document.createElement('div');
@@ -142,16 +147,30 @@ const SlotMachineComponent = ({
       item.appendChild(nameElement);
       stripRef.current.appendChild(item);
     });
-    // Re-centre the strip.  We place the start roughly in the middle of the
-    // duplicate copies so that the central viewport shows a seamless set of
-    // items when the component first renders.  Because we might have an
-    // odd number of duplicates, we use Math.floor.
-    const middleGroup = Math.floor(duplicationFactor / 2);
-    const startPosition = -middleGroup * participants.length * itemWidth;
-    gsap.set(stripRef.current, { x: startPosition });
-    // We do not call updateHighlight() here directly to avoid capturing a
-    // stale closure.  Instead, the caller will invoke updateHighlight
-    // explicitly after re-creating the strip.
+    // After populating the strip, measure the full width of an item (including
+    // margins).  This measurement is required for accurate positioning and
+    // highlight calculations.  We do this synchronously because the items
+    // have been appended to the DOM and have computed styles.
+    const firstItem = stripRef.current.querySelector('.slot-item');
+    if (firstItem) {
+      const computed = window.getComputedStyle(firstItem);
+      const marginLeft = parseFloat(computed.marginLeft) || 0;
+      const marginRight = parseFloat(computed.marginRight) || 0;
+      const fullWidth = firstItem.offsetWidth + marginLeft + marginRight;
+      setItemSize(fullWidth);
+      // Centre the strip using the full item size.  We start in the middle of
+      // the duplicated list so there is room to scroll in both directions.
+      const middleGroup = Math.floor(duplicationFactor / 2);
+      const startPosition = -middleGroup * participants.length * fullWidth;
+      gsap.set(stripRef.current, { x: startPosition });
+    } else {
+      setItemSize(itemWidth);
+      const middleGroup = Math.floor(duplicationFactor / 2);
+      const startPosition = -middleGroup * participants.length * itemWidth;
+      gsap.set(stripRef.current, { x: startPosition });
+    }
+    // Do not update highlight here; caller will handle it after the strip is
+    // created.
   }, [participants, wheelSpeed, itemWidth]);
 
   // Initialise the strip when participants or the speed changes
@@ -178,18 +197,20 @@ useEffect(() => {
     };
     const settings = speedSettings[wheelSpeed] || speedSettings.fast;
     let finalPosition;
+    // Use the measured full size of each item for all distance calculations.
+    const size = itemSize || itemWidth;
     if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
-      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemWidth;
-      const targetPosition = targetWinnerIndex * itemWidth;
+      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+      const targetPosition = targetWinnerIndex * size;
       const currentX = gsap.getProperty(stripRef.current, 'x');
-      const totalDistance = settings.spins * participants.length * itemWidth;
+      const totalDistance = settings.spins * participants.length * size;
       finalPosition = currentX - totalDistance - targetPosition + centerOffset;
     } else {
       const randomIndex = Math.floor(Math.random() * participants.length);
-      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemWidth;
-      const targetPosition = randomIndex * itemWidth;
+      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+      const targetPosition = randomIndex * size;
       const currentX = gsap.getProperty(stripRef.current, 'x');
-      const totalDistance = settings.spins * participants.length * itemWidth;
+      const totalDistance = settings.spins * participants.length * size;
       finalPosition = currentX - totalDistance - targetPosition + centerOffset;
     }
     animationRef.current = gsap
@@ -226,8 +247,11 @@ useEffect(() => {
     if (!stripRef.current) return;
     // Compute the index of the item currently under the central marker
     const currentX = -gsap.getProperty(stripRef.current, 'x');
-    const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemWidth;
-    const rawIndex = Math.round((currentX + centerOffset) / itemWidth);
+    // Determine the size of each item (including margins).  Fall back to
+    // `itemWidth` if `itemSize` hasn't been measured yet.
+    const size = itemSize || itemWidth;
+    const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+    const rawIndex = Math.round((currentX + centerOffset) / size);
     const len = participants.length;
     if (len === 0) return;
     let participantIndex = rawIndex % len;
@@ -238,7 +262,7 @@ useEffect(() => {
       lastHighlightIdRef.current = participant.id;
       setCurrentHighlight(participant);
     }
-  }, [participants, itemWidth]);
+  }, [participants, itemWidth, itemSize]);
 
   // After the spin completes, emit the winner to the backend via the WebSocket
   // and animate the winning item.  Guard against duplicate notifications
