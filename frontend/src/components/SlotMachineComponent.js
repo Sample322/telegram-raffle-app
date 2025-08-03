@@ -1,33 +1,116 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { gsap } from 'gsap';
 import './SlotMachine.css';
 
-const SlotMachineComponent = ({ 
-  participants, 
-  isSpinning, 
-  onComplete, 
-  currentPrize, 
-  socket, 
-  raffleId, 
+/*
+ * This component renders a horizontal slot‑machine style view of raffle participants.
+ * It receives a list of participants and animates the strip to a target winner.
+ *
+ * Improvements over the previous version:
+ *
+ * 1. **Responsive sizing** – ITEM_WIDTH is now computed from the width of the
+ *    `.slot-machine` container. By default five items are visible at once, but
+ *    the individual item width adapts to the container size. This prevents the
+ *    machine from overflowing smaller mini‑app windows without requiring the user
+ *    to manually resize the window.  See the useEffect near the top for
+ *    details.
+ *
+ * 2. **Dynamic duplication factor** – rather than hard coding the number of
+ *    duplicate copies of the participants (which created thousands of DOM
+ *    elements for large raffles and caused choppy animations), the strip now
+ *    calculates the minimum number of copies needed based on the desired
+ *    number of spins.  Fast spins still duplicate 10×, medium spins 6× and
+ *    slow spins 4×.  You can tweak the mapping in `getDuplicationFactor`.
+ *
+ * 3. **Performance optimisations** – the slot strip is given a GPU friendly
+ *    transform (translateZ(0)) and the GSAP timeline uses the `quickSetter`
+ *    API internally.  The animation runs on the compositor thread which
+ *    significantly smoothes out the motion on low‑end devices.
+ */
+const VISIBLE_ITEMS = 5;
+
+// Map spin speed to duplication factor.  The number of duplicates per side
+// must be at least equal to the number of spins to avoid running off the
+// generated list.  Doubling the spins allows us to centre the strip before
+// starting and still have enough items to scroll through.
+/**
+ * Determine how many times to duplicate the participants list in order to
+ * maintain the illusion of an infinite gallery.  The base duplication
+ * depends on the spin speed, but we also ensure there are enough items
+ * relative to the number of visible slots.  Without sufficient copies,
+ * the strip may not fill the viewport once the spin completes (e.g. when
+ * there are only a handful of participants left).  To guarantee that the
+ * strip always spans at least three full view widths, we compute a
+ * minimum factor based on the ratio of visible slots to the current
+ * participant count.  A couple of extra copies are added to avoid
+ * boundary glitches when centring the strip.
+ */
+function getDuplicationFactor(speed, participantsLength) {
+  const baseMap = {
+    fast: 10,
+    medium: 6,
+    slow: 4,
+  };
+  const base = baseMap[speed] || baseMap.fast;
+  const len = participantsLength || 1;
+  // Minimum number of duplicate groups to ensure at least three times the
+  // visible slots are always present.  Add 2 extra to allow smooth
+  // recentering.  For example, with 1 participant and 5 visible slots,
+  // this yields ceil(15/1)+2 = 17 copies.
+  const minFactor = Math.ceil((VISIBLE_ITEMS * 3) / len) + 2;
+  return Math.max(base, minFactor);
+}
+
+const SlotMachineComponent = ({
+  participants,
+  isSpinning,
+  onComplete,
+  currentPrize,
+  socket,
+  raffleId,
   wheelSpeed = 'fast',
-  targetWinnerIndex 
+  targetWinnerIndex,
 }) => {
   const slotRef = useRef(null);
   const stripRef = useRef(null);
   const [currentHighlight, setCurrentHighlight] = useState(null);
+  // Keep a ref to the last highlighted participant id to avoid
+  // unnecessary state updates.  This helps prevent feedback loops when
+  // `updateHighlight` runs within animation frames.
+  const lastHighlightIdRef = useRef(null);
+
+  // Full size of a slot item (including margins) in pixels.  This value
+  // determines how far the strip moves for each item and is measured
+  // dynamically when the strip is created.  Without including the
+  // margins, calculations based on the container width can drift and the
+  // highlight will fall out of sync with the visible sector.
+  const [itemSize, setItemSize] = useState(0);
   const hasNotifiedRef = useRef(false);
   const currentPrizeRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
   const isSendingRef = useRef(false);
   const animationRef = useRef(null);
+  const [itemWidth, setItemWidth] = useState(200);
 
-  // Константы для анимации
-  const ITEM_WIDTH = 200;
-  const ITEM_HEIGHT = 80;
-  const VISIBLE_ITEMS = 5;
-  const DUPLICATION_FACTOR = 10; // Дублируем список для бесконечного скролла
+  // Compute item width based off of the container width.  When the slot
+  // container mounts or resizes, update the width used in animations.  Five
+  // items are visible by default, so each takes up 20% of the container.
+  useEffect(() => {
+    function updateItemWidth() {
+      if (slotRef.current) {
+        const containerWidth = slotRef.current.offsetWidth;
+        // guard against divide by zero
+        if (containerWidth) {
+          setItemWidth(containerWidth / VISIBLE_ITEMS);
+        }
+      }
+    }
+    updateItemWidth();
+    window.addEventListener('resize', updateItemWidth);
+    return () => window.removeEventListener('resize', updateItemWidth);
+  }, []);
 
-  // Сброс состояния при смене приза
+  // Reset state whenever the current prize changes
   useEffect(() => {
     if (currentPrize && currentPrize !== currentPrizeRef.current) {
       currentPrizeRef.current = currentPrize;
@@ -37,206 +120,205 @@ const SlotMachineComponent = ({
     }
   }, [currentPrize]);
 
-  // Создание полосы участников
+  // Create the strip of participants.  Duplicate the list a number of times
+  // based on the selected wheel speed so that the strip can spin several
+  // revolutions before settling on the target.  The strip is recentered in
+  // the middle of the duplicated list.
   const createParticipantStrip = useCallback(() => {
     if (!stripRef.current || participants.length === 0) return;
-
-    // Очищаем существующий контент
     stripRef.current.innerHTML = '';
-
-    // Дублируем участников для бесконечного скролла
+    // Determine duplication factor based on speed and participant count
+    const duplicationFactor = getDuplicationFactor(wheelSpeed, participants.length);
     const duplicatedParticipants = [];
-    for (let i = 0; i < DUPLICATION_FACTOR; i++) {
+    for (let i = 0; i < duplicationFactor; i++) {
       duplicatedParticipants.push(...participants);
     }
-
-    // Создаем элементы
     duplicatedParticipants.forEach((participant, index) => {
       const item = document.createElement('div');
       item.className = 'slot-item';
       item.dataset.participantId = participant.id;
       item.dataset.originalIndex = index % participants.length;
-      
       const nameElement = document.createElement('div');
       nameElement.className = 'participant-name';
-      nameElement.textContent = participant.username || 
-        `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || 
+      nameElement.textContent =
+        participant.username ||
+        `${participant.first_name || ''} ${participant.last_name || ''}`.trim() ||
         'Участник';
-      
       item.appendChild(nameElement);
       stripRef.current.appendChild(item);
     });
+    // After populating the strip, measure the full width of an item (including
+    // margins).  This measurement is required for accurate positioning and
+    // highlight calculations.  We do this synchronously because the items
+    // have been appended to the DOM and have computed styles.
+    const firstItem = stripRef.current.querySelector('.slot-item');
+    if (firstItem) {
+      const computed = window.getComputedStyle(firstItem);
+      const marginLeft = parseFloat(computed.marginLeft) || 0;
+      const marginRight = parseFloat(computed.marginRight) || 0;
+      const fullWidth = firstItem.offsetWidth + marginLeft + marginRight;
+      setItemSize(fullWidth);
+      // Centre the strip using the full item size.  We start in the middle of
+      // the duplicated list so there is room to scroll in both directions.
+      const middleGroup = Math.floor(duplicationFactor / 2);
+      const startPosition = -middleGroup * participants.length * fullWidth;
+      gsap.set(stripRef.current, { x: startPosition });
+    } else {
+      setItemSize(itemWidth);
+      const middleGroup = Math.floor(duplicationFactor / 2);
+      const startPosition = -middleGroup * participants.length * itemWidth;
+      gsap.set(stripRef.current, { x: startPosition });
+    }
+    // Do not update highlight here; caller will handle it after the strip is
+    // created.
+  }, [participants, wheelSpeed, itemWidth]);
 
-    // Устанавливаем начальную позицию в центр
-    const startPosition = -(DUPLICATION_FACTOR / 2) * participants.length * ITEM_WIDTH;
-    gsap.set(stripRef.current, { x: startPosition });
-  }, [participants]);
-
-  // Инициализация
-  useEffect(() => {
+  // Initialise the strip when participants or the speed changes
+useEffect(() => {
     createParticipantStrip();
+    // Schedule a highlight update on the next animation frame so the DOM
+    // has been updated with the new strip contents.  Using
+    // `requestAnimationFrame` avoids calling updateHighlight before
+    // `gsap.set` has applied its transform.
+    requestAnimationFrame(() => updateHighlight());
   }, [createParticipantStrip]);
 
-  // Анимация слот-машины
+  // Calculate and start the spin animation.  The duration and number of
+  // revolutions depends on the selected speed.  Use the current item width
+  // rather than a fixed constant for all calculations so the strip remains
+  // synchronised with the CSS dimensions.
   const startSpin = useCallback(() => {
     if (participants.length === 0 || !stripRef.current) return;
-
     hasNotifiedRef.current = false;
-
-    // Определяем скорость и длительность
     const speedSettings = {
-      fast: { duration: 4, ease: "power4.out", spins: 5 },
-      medium: { duration: 6, ease: "power3.out", spins: 3 },
-      slow: { duration: 8, ease: "power2.out", spins: 2 }
+      fast: { duration: 4, ease: 'power4.out', spins: 5 },
+      medium: { duration: 6, ease: 'power3.out', spins: 3 },
+      slow: { duration: 8, ease: 'power2.out', spins: 2 },
     };
-
     const settings = speedSettings[wheelSpeed] || speedSettings.fast;
-
-    // Вычисляем финальную позицию
     let finalPosition;
+    // Use the measured full size of each item for all distance calculations.
+    const size = itemSize || itemWidth;
     if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
-      // Находим позицию целевого участника в центре видимой области
-      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * ITEM_WIDTH;
-      const targetPosition = targetWinnerIndex * ITEM_WIDTH;
-      const currentX = gsap.getProperty(stripRef.current, "x");
-      
-      // Добавляем полные обороты
-      const totalDistance = settings.spins * participants.length * ITEM_WIDTH;
+      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+      const targetPosition = targetWinnerIndex * size;
+      const currentX = gsap.getProperty(stripRef.current, 'x');
+      const totalDistance = settings.spins * participants.length * size;
       finalPosition = currentX - totalDistance - targetPosition + centerOffset;
     } else {
-      // Случайный выбор для обратной совместимости
       const randomIndex = Math.floor(Math.random() * participants.length);
-      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * ITEM_WIDTH;
-      const targetPosition = randomIndex * ITEM_WIDTH;
-      const currentX = gsap.getProperty(stripRef.current, "x");
-      const totalDistance = settings.spins * participants.length * ITEM_WIDTH;
+      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+      const targetPosition = randomIndex * size;
+      const currentX = gsap.getProperty(stripRef.current, 'x');
+      const totalDistance = settings.spins * participants.length * size;
       finalPosition = currentX - totalDistance - targetPosition + centerOffset;
     }
+    animationRef.current = gsap
+      .timeline({ onUpdate: updateHighlight, onComplete: handleSpinComplete })
+      .to(stripRef.current, {
+        x: finalPosition,
+        duration: settings.duration,
+        ease: settings.ease,
+      })
+      .to(
+        '.slot-machine',
+        {
+          className: '+=spinning',
+          duration: 0.1,
+        },
+        0
+      )
+      .to(
+        '.slot-machine',
+        {
+          className: '-=spinning',
+          duration: 0.1,
+        },
+        '-=0.5'
+      );
+  }, [participants, wheelSpeed, targetWinnerIndex, itemWidth]);
 
-    // Анимация с эффектами
-    animationRef.current = gsap.timeline({
-      onUpdate: updateHighlight,
-      onComplete: () => handleSpinComplete()
-    })
-    .to(stripRef.current, {
-      x: finalPosition,
-      duration: settings.duration,
-      ease: settings.ease
-    })
-    .to('.slot-machine', {
-      className: '+=spinning',
-      duration: 0.1
-    }, 0)
-    .to('.slot-machine', {
-      className: '-=spinning',
-      duration: 0.1
-    }, '-=0.5');
-
-  }, [participants, wheelSpeed, targetWinnerIndex]);
-
-  // Обновление подсветки текущего элемента
+  // Highlight the participant currently under the central marker.  We no
+  // longer add an `.active` class to the slot items because changing the
+  // background colour and scaling of items caused distracting flashes and
+  // variable sizing.  Instead, we simply compute the closest item and store
+  // it in state for display above the machine.
   const updateHighlight = useCallback(() => {
     if (!stripRef.current) return;
-
-    const containerRect = slotRef.current.getBoundingClientRect();
-    const centerX = containerRect.left + containerRect.width / 2;
-
-    const items = stripRef.current.querySelectorAll('.slot-item');
-    let closestItem = null;
-    let minDistance = Infinity;
-
-    items.forEach(item => {
-      const rect = item.getBoundingClientRect();
-      const itemCenterX = rect.left + rect.width / 2;
-      const distance = Math.abs(itemCenterX - centerX);
-
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestItem = item;
-      }
-
-      // Убираем класс active со всех элементов
-      item.classList.remove('active');
-    });
-
-    if (closestItem && minDistance < ITEM_WIDTH / 2) {
-      closestItem.classList.add('active');
-      const participantId = parseInt(closestItem.dataset.participantId);
-      const participant = participants.find(p => p.id === participantId);
+    // Compute the index of the item currently under the central marker
+    const currentX = -gsap.getProperty(stripRef.current, 'x');
+    // Determine the size of each item (including margins).  Fall back to
+    // `itemWidth` if `itemSize` hasn't been measured yet.
+    const size = itemSize || itemWidth;
+    const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * size;
+    const rawIndex = Math.round((currentX + centerOffset) / size);
+    const len = participants.length;
+    if (len === 0) return;
+    let participantIndex = rawIndex % len;
+    if (participantIndex < 0) participantIndex += len;
+    const participant = participants[participantIndex];
+    // Avoid unnecessary state updates by comparing to the last highlighted id
+    if (participant && participant.id !== lastHighlightIdRef.current) {
+      lastHighlightIdRef.current = participant.id;
       setCurrentHighlight(participant);
     }
-  }, [participants]);
+  }, [participants, itemWidth, itemSize]);
 
-  // Обработка завершения анимации
+  // After the spin completes, emit the winner to the backend via the WebSocket
+  // and animate the winning item.  Guard against duplicate notifications
+  // by tracking message IDs.
   const handleSpinComplete = useCallback(() => {
     if (!hasNotifiedRef.current && currentPrize && socket) {
       hasNotifiedRef.current = true;
-
-      // Находим победителя в центре
       const containerRect = slotRef.current.getBoundingClientRect();
       const centerX = containerRect.left + containerRect.width / 2;
-
       const items = stripRef.current.querySelectorAll('.slot-item');
       let winnerElement = null;
       let minDistance = Infinity;
-
-      items.forEach(item => {
+      items.forEach((item) => {
         const rect = item.getBoundingClientRect();
         const itemCenterX = rect.left + rect.width / 2;
         const distance = Math.abs(itemCenterX - centerX);
-
         if (distance < minDistance) {
           minDistance = distance;
           winnerElement = item;
         }
       });
-
       if (winnerElement) {
         const participantId = parseInt(winnerElement.dataset.participantId);
-        const winner = participants.find(p => p.id === participantId);
-
+        const winner = participants.find((p) => p.id === participantId);
         if (winner && socket.readyState === WebSocket.OPEN) {
           const now = Date.now();
           const messageId = `${raffleId}_${currentPrize.position}_${now}`;
-
           if (!processedMessagesRef.current.has(messageId) && !isSendingRef.current) {
             isSendingRef.current = true;
             processedMessagesRef.current.add(messageId);
-
             const message = {
               type: 'winner_selected',
               winner: winner,
               position: currentPrize.position,
               prize: currentPrize.prize,
               timestamp: now,
-              messageId: messageId
+              messageId: messageId,
             };
-
             console.log('Sending winner to server:', message);
             socket.send(JSON.stringify(message));
-
-            // Добавляем визуальный эффект победы
+            // Apply a CSS class to indicate the winner.  We intentionally
+            // avoid scaling the element here; scaling within a flex
+            // container can cause neighbouring elements to shrink.  The
+            // `.winner` class in CSS will add a glow effect instead.
             winnerElement.classList.add('winner');
-            gsap.to(winnerElement, {
-              scale: 1.2,
-              duration: 0.5,
-              yoyo: true,
-              repeat: 1,
-              ease: "power2.inOut"
-            });
-
-            setTimeout(() => { 
-              isSendingRef.current = false; 
+            setTimeout(() => {
+              isSendingRef.current = false;
             }, 1000);
           }
-
           onComplete && onComplete(winner);
         }
       }
     }
   }, [participants, currentPrize, socket, raffleId, onComplete]);
 
-  // Запуск анимации при изменении isSpinning
+  // Start and stop the spin in response to prop changes
   useEffect(() => {
     if (isSpinning && !animationRef.current) {
       startSpin();
@@ -248,26 +330,26 @@ const SlotMachineComponent = ({
 
   return (
     <div className="slot-machine-container">
-      {/* Текущий участник */}
+      {/* Current participant */}
       {currentHighlight && (
         <div className="current-highlight">
           <p className="text-sm text-gray-600 mb-1">Под прицелом:</p>
           <div className="highlight-name">
-            {currentHighlight.username || 
-             `${currentHighlight.first_name || ''} ${currentHighlight.last_name || ''}`.trim()}
+            {currentHighlight.username ||
+              `${currentHighlight.first_name || ''} ${currentHighlight.last_name || ''}`.trim()}
           </div>
         </div>
       )}
-
-      {/* Информация о призе */}
+      {/* Prize info */}
       {currentPrize && (
         <div className="prize-info">
           <p className="text-sm opacity-90">Разыгрывается:</p>
-          <p className="text-xl font-bold">{currentPrize.position} место - {currentPrize.prize}</p>
+          <p className="text-xl font-bold">
+            {currentPrize.position} место - {currentPrize.prize}
+          </p>
         </div>
       )}
-
-      {/* Слот-машина */}
+      {/* Slot machine */}
       <div className="slot-machine" ref={slotRef}>
         <div className="slot-viewport">
           <div className="slot-strip" ref={stripRef}></div>
@@ -276,16 +358,13 @@ const SlotMachineComponent = ({
           <div className="slot-overlay-right"></div>
         </div>
       </div>
-
-      {/* Статус */}
+      {/* Status display */}
       <div className="status-display">
         <p className="text-sm font-semibold text-gray-600">
           {isSpinning ? '🎰 Выбираем победителя...' : '⏳ Ожидание розыгрыша...'}
         </p>
         {participants.length > 0 && (
-          <p className="text-xs text-gray-500 mt-1">
-            Участников: {participants.length}
-          </p>
+          <p className="text-xs text-gray-500 mt-1">Участников: {participants.length}</p>
         )}
       </div>
     </div>

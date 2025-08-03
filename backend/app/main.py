@@ -10,7 +10,8 @@ from .database import init_db
 from .routers import raffles, users, admin, websocket
 from .services.raffle import RaffleService
 from .websocket_manager import manager  # Импортируем из нового файла
-
+import logging
+logging.basicConfig(level=logging.DEBUG)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
