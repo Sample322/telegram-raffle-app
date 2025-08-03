@@ -1,32 +1,36 @@
-# Build stage
-FROM node:18-alpine as build
+FROM python:3.11-slim
 
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set work directory
 WORKDIR /app
+# Create uploads directory and set permissions
+RUN mkdir -p /app/uploads && chmod 755 /app/uploads
 
-# Copy package files
-COPY package*.json ./
+# Add volume for uploads
+VOLUME ["/app/uploads"]
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install ALL dependencies
-RUN npm install
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install aiosqlite  # Убедимся что установлен
 
-# Copy all source files
+# Copy project
 COPY . .
 
-# Build the application
-RUN npm run build
+# Create uploads directory
+RUN mkdir -p uploads
 
-# Production stage
-FROM nginx:alpine
+# Expose port
+EXPOSE 8000
 
-# Remove default nginx config
-RUN rm -rf /etc/nginx/conf.d/default.conf
-
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy built React app
-COPY --from=build /app/build /usr/share/nginx/html
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
