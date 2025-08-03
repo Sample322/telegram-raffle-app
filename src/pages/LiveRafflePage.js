@@ -296,8 +296,6 @@ function LiveRafflePage() {
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          // Замените секцию с Wheel/Slot в LiveRafflePage.js на эту:
-
         {/* Wheel/Slot Section */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-lg shadow-2xl" style={{ 
