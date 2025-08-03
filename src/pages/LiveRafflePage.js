@@ -255,11 +255,13 @@ function LiveRafflePage() {
     .filter(p => !eliminatedIds.includes(p.id));
 
 
-  return (
+// Замените весь return блок в LiveRafflePage.js начиная с <div className="min-h-screen...
+
+return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
       {/* Navigation Header */}
       <div className="sticky top-0 z-50 bg-white/10 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="container mx-auto px-2 py-3 flex items-center justify-between">
           <div className="flex items-center">
             <button
               onClick={() => navigate('/')}
@@ -268,16 +270,16 @@ function LiveRafflePage() {
             >
               <ArrowLeftIcon className="h-5 w-5 text-white" />
             </button>
-            <h1 className="ml-3 text-lg font-semibold text-white truncate">{raffle.title}</h1>
+            <h1 className="ml-3 text-lg font-semibold text-white truncate max-w-[200px]">{raffle.title}</h1>
           </div>
           
           {/* Connection status indicator */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1">
             <div className={`w-2 h-2 rounded-full ${
               connectionStatus === 'connected' ? 'bg-green-400' : 
               connectionStatus === 'error' ? 'bg-red-400' : 'bg-yellow-400'
             } animate-pulse`}></div>
-            <span className="text-xs opacity-75">
+            <span className="text-xs opacity-75 hidden sm:inline">
               {connectionStatus === 'connected' ? 'Подключено' :
                connectionStatus === 'error' ? 'Ошибка' : 
                connectionStatus === 'completed' ? 'Завершен' : 'Подключение...'}
@@ -286,29 +288,24 @@ function LiveRafflePage() {
         </div>
       </div>
 
-      <div className="container mx-auto p-4 max-w-full overflow-x-hidden">
+      <div className="container mx-auto px-2 py-4 max-w-7xl">
         {/* Countdown display */}
         {countdown && countdown > 0 && (
-          <div className="text-center mb-8 animate-pulse">
-            <p className="text-2xl mb-2">🎰 Розыгрыш начнется через:</p>
-            <p className="text-6xl font-bold">{formatCountdown(countdown)}</p>
+          <div className="text-center mb-6 animate-pulse">
+            <p className="text-xl mb-2">🎰 Розыгрыш начнется через:</p>
+            <p className="text-5xl font-bold">{formatCountdown(countdown)}</p>
           </div>
         )}
 
-        <div className="grid lg:grid-cols-3 gap-8">
-        {/* Wheel/Slot Section */}
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-lg shadow-2xl" style={{ 
-            maxWidth: '100%', 
-            overflow: 'hidden',
-            // Важно: не добавляем padding напрямую к контейнеру со слот-машиной
-          }}>
-            {/* Внутренний контейнер для правильного spacing */}
-            <div className="p-4 md:p-6" style={{ 
+        <div className="grid lg:grid-cols-3 gap-4">
+          {/* Wheel/Slot Section - занимает больше места на больших экранах */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-2xl" style={{ 
               width: '100%',
-              minWidth: 0, // Критично для flex children
-              overflow: 'hidden'
+              maxWidth: '100%',
+              overflow: 'visible', // Изменено с hidden
             }}>
+              {/* Убираем внутренний padding для слот-машины */}
               {wheelParticipants.length > 0 ? (
                 raffle?.display_type === 'slot' ? (
                   <SlotMachineComponent
@@ -322,19 +319,21 @@ function LiveRafflePage() {
                     onComplete={(winner) => console.log('Winner selected:', winner)}
                   />
                 ) : (
-                  <WheelComponent
-                    participants={wheelParticipants}
-                    isSpinning={isSpinning}
-                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                    socket={socket}
-                    raffleId={id}
-                    wheelSpeed={raffle?.wheel_speed || 'fast'}
-                    targetAngle={currentRound?.targetAngle}
-                    onComplete={(winner) => console.log('Winner selected:', winner)}
-                  />
+                  <div className="p-4 md:p-6">
+                    <WheelComponent
+                      participants={wheelParticipants}
+                      isSpinning={isSpinning}
+                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                      socket={socket}
+                      raffleId={id}
+                      wheelSpeed={raffle?.wheel_speed || 'fast'}
+                      targetAngle={currentRound?.targetAngle}
+                      onComplete={(winner) => console.log('Winner selected:', winner)}
+                    />
+                  </div>
                 )
               ) : (
-                <div className="text-center text-gray-600 py-20">
+                <div className="text-center text-gray-600 py-20 px-4">
                   <p className="text-xl mb-4">Ожидание участников...</p>
                   <p>Текущее количество участников: {participants.length}</p>
                   {participants.length < Object.keys(raffle.prizes).length && (
@@ -346,14 +345,13 @@ function LiveRafflePage() {
               )}
             </div>
           </div>
-        </div>
 
-          {/* Winners Table */}
-          <div className="bg-white/10 backdrop-blur rounded-lg p-6">
-            <h2 className="text-2xl font-semibold mb-4">🏆 Призовые места</h2>
-            <div className="space-y-3">
+          {/* Winners Table - более компактная на мобильных */}
+          <div className="bg-white/10 backdrop-blur rounded-lg p-4">
+            <h2 className="text-xl font-semibold mb-3">🏆 Призовые места</h2>
+            <div className="space-y-2">
               {Object.entries(raffle.prizes)
-                .sort(([a], [b]) => parseInt(a) - parseInt(b)) // Сортируем по возрастанию (1, 2, 3...)
+                .sort(([a], [b]) => parseInt(a) - parseInt(b))
                 .map(([position, prize]) => {
                 const winner = winners.find(w => w.position === parseInt(position));
                 const isCurrentRound = currentRound?.position === parseInt(position);
@@ -361,27 +359,27 @@ function LiveRafflePage() {
                 return (
                   <div 
                     key={position} 
-                    className={`p-4 rounded-lg transition-all duration-300 ${
+                    className={`p-3 rounded-lg transition-all duration-300 ${
                       winner ? 'bg-green-500/30 scale-105' : 
                       isCurrentRound ? 'bg-yellow-500/30 animate-pulse' : 
                       'bg-white/10'
                     }`}
                   >
-                    <div className="font-semibold flex items-center justify-between">
+                    <div className="font-semibold flex items-center justify-between text-sm">
                       <span>{position} место</span>
                       {position === '1' && '🥇'}
                       {position === '2' && '🥈'}
                       {position === '3' && '🥉'}
                     </div>
-                    <div className="text-sm opacity-90">{prize}</div>
+                    <div className="text-xs opacity-90 mt-1">{prize}</div>
                     {winner && (
-                      <div className="text-lg mt-2 font-bold">
+                      <div className="text-base mt-2 font-bold">
                         🎉 @{winner.winner?.username || winner.user?.username || 'Победитель'}
                       </div>
                     )}
                     {isCurrentRound && !winner && (
-                      <div className="text-sm mt-2 animate-pulse">
-                        🎰 Разыгрывается сейчас...
+                      <div className="text-xs mt-2 animate-pulse">
+                        🎰 Разыгрывается...
                       </div>
                     )}
                   </div>
@@ -392,20 +390,20 @@ function LiveRafflePage() {
         </div>
 
         {/* Participants Count */}
-        <div className="mt-8 bg-white/10 backdrop-blur rounded-lg p-6 text-center">
-          <h3 className="text-2xl font-semibold mb-2">👥 Всего участников</h3>
-          <p className="text-4xl font-bold">{participants.length}</p>
+        <div className="mt-6 bg-white/10 backdrop-blur rounded-lg p-4 text-center">
+          <h3 className="text-xl font-semibold mb-2">👥 Всего участников</h3>
+          <p className="text-3xl font-bold">{participants.length}</p>
         </div>
 
         {/* Completed message */}
         {connectionStatus === 'completed' && (
-          <div className="mt-8 text-center">
-            <div className="bg-white/20 backdrop-blur rounded-lg p-8">
-              <h2 className="text-3xl font-bold mb-4">🎊 Розыгрыш завершен!</h2>
-              <p className="text-xl mb-4">Поздравляем всех победителей!</p>
+          <div className="mt-6 text-center">
+            <div className="bg-white/20 backdrop-blur rounded-lg p-6">
+              <h2 className="text-2xl font-bold mb-3">🎊 Розыгрыш завершен!</h2>
+              <p className="text-lg mb-4">Поздравляем всех победителей!</p>
               <button
                 onClick={() => navigate('/')}
-                className="bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                className="bg-white text-purple-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
               >
                 Вернуться на главную
               </button>
