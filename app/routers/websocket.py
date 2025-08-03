@@ -140,8 +140,8 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 "prize": raffle.prizes[position],
                 "participants": wheel_participants,
                 "participant_order": [p["id"] for p in wheel_participants],
-                "target_winner_index": winner_index,
-                "target_angle": target_angle  # Точный угол остановки
+                "target_winner_index": winner_index,  # Индекс победителя
+                "target_angle": target_angle  # Оставляем для обратной совместимости с колесом
             }, raffle_id)
             
             logger.info(f"Started wheel for position {position}, waiting for result...")

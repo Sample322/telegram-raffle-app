@@ -29,7 +29,7 @@ class RaffleBase(BaseModel):
     draw_delay_minutes: int = 5
     wheel_speed: str = "fast"  # НОВОЕ ПОЛЕ
     post_channels: List[str] = []  # НОВОЕ ПОЛЕ
-
+    display_type: str = "slot"
 class RaffleCreate(RaffleBase):
     pass
 
