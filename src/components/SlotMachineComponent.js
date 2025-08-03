@@ -97,18 +97,30 @@ const SlotMachineComponent = ({
   // items are visible by default, so each takes up 20% of the container.
   useEffect(() => {
     function updateItemWidth() {
-      if (slotRef.current) {
+        if (slotRef.current) {
         const containerWidth = slotRef.current.offsetWidth;
-        // guard against divide by zero
-        if (containerWidth) {
-          setItemWidth(containerWidth / VISIBLE_ITEMS);
+        // Учитываем padding и margins
+        const computedStyle = window.getComputedStyle(slotRef.current);
+        const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+        const paddingRight = parseFloat(computedStyle.paddingRight) || 0;
+        const availableWidth = containerWidth - paddingLeft - paddingRight;
+        
+        if (availableWidth > 0) {
+            setItemWidth(availableWidth / VISIBLE_ITEMS);
         }
-      }
+        }
     }
+    
+    // Задержка для корректного расчета после рендера
+    const timeoutId = setTimeout(updateItemWidth, 100);
     updateItemWidth();
+    
     window.addEventListener('resize', updateItemWidth);
-    return () => window.removeEventListener('resize', updateItemWidth);
-  }, []);
+    return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('resize', updateItemWidth);
+    };
+    }, []);
 
   // Reset state whenever the current prize changes
   useEffect(() => {
