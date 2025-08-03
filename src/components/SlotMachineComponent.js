@@ -33,13 +33,32 @@ const VISIBLE_ITEMS = 5;
 // must be at least equal to the number of spins to avoid running off the
 // generated list.  Doubling the spins allows us to centre the strip before
 // starting and still have enough items to scroll through.
-function getDuplicationFactor(speed) {
-  const map = {
+/**
+ * Determine how many times to duplicate the participants list in order to
+ * maintain the illusion of an infinite gallery.  The base duplication
+ * depends on the spin speed, but we also ensure there are enough items
+ * relative to the number of visible slots.  Without sufficient copies,
+ * the strip may not fill the viewport once the spin completes (e.g. when
+ * there are only a handful of participants left).  To guarantee that the
+ * strip always spans at least three full view widths, we compute a
+ * minimum factor based on the ratio of visible slots to the current
+ * participant count.  A couple of extra copies are added to avoid
+ * boundary glitches when centring the strip.
+ */
+function getDuplicationFactor(speed, participantsLength) {
+  const baseMap = {
     fast: 10,
     medium: 6,
     slow: 4,
   };
-  return map[speed] || map.fast;
+  const base = baseMap[speed] || baseMap.fast;
+  const len = participantsLength || 1;
+  // Minimum number of duplicate groups to ensure at least three times the
+  // visible slots are always present.  Add 2 extra to allow smooth
+  // recentering.  For example, with 1 participant and 5 visible slots,
+  // this yields ceil(15/1)+2 = 17 copies.
+  const minFactor = Math.ceil((VISIBLE_ITEMS * 3) / len) + 2;
+  return Math.max(base, minFactor);
 }
 
 const SlotMachineComponent = ({
@@ -97,7 +116,8 @@ const SlotMachineComponent = ({
   const createParticipantStrip = useCallback(() => {
     if (!stripRef.current || participants.length === 0) return;
     stripRef.current.innerHTML = '';
-    const duplicationFactor = getDuplicationFactor(wheelSpeed);
+    // Determine duplication factor based on speed and participant count
+    const duplicationFactor = getDuplicationFactor(wheelSpeed, participants.length);
     const duplicatedParticipants = [];
     for (let i = 0; i < duplicationFactor; i++) {
       duplicatedParticipants.push(...participants);
@@ -105,6 +125,8 @@ const SlotMachineComponent = ({
     duplicatedParticipants.forEach((participant, index) => {
       const item = document.createElement('div');
       item.className = 'slot-item';
+      // Store the participant id for later lookup.  Use data attributes so we
+      // don't need to attach React props to DOM nodes directly.
       item.dataset.participantId = participant.id;
       item.dataset.originalIndex = index % participants.length;
       const nameElement = document.createElement('div');
@@ -116,15 +138,26 @@ const SlotMachineComponent = ({
       item.appendChild(nameElement);
       stripRef.current.appendChild(item);
     });
-    // Start in the middle so there is room to scroll both directions
-    const startPosition = -(duplicationFactor / 2) * participants.length * itemWidth;
+    // Re-centre the strip.  We place the start roughly in the middle of the
+    // duplicate copies so that the central viewport shows a seamless set of
+    // items when the component first renders.  Because we might have an
+    // odd number of duplicates, we use Math.floor.
+    const middleGroup = Math.floor(duplicationFactor / 2);
+    const startPosition = -middleGroup * participants.length * itemWidth;
     gsap.set(stripRef.current, { x: startPosition });
-  }, [participants, wheelSpeed, itemWidth]);
+    // We do not call updateHighlight() here directly to avoid capturing a
+    // stale closure.  Instead, the caller will invoke updateHighlight
+    // explicitly after re-creating the strip.
+  }, [participants, wheelSpeed, itemWidth, updateHighlight]);
 
   // Initialise the strip when participants or the speed changes
-  useEffect(() => {
+useEffect(() => {
     createParticipantStrip();
-  }, [createParticipantStrip]);
+    // Immediately compute the highlighted participant once the strip is
+    // created.  This ensures the displayed name stays in sync when the
+    // participant list changes (e.g. after a winner is removed).
+    updateHighlight();
+  }, [createParticipantStrip, updateHighlight]);
 
   // Calculate and start the spin animation.  The duration and number of
   // revolutions depends on the selected speed.  Use the current item width
@@ -186,26 +219,24 @@ const SlotMachineComponent = ({
   // it in state for display above the machine.
   const updateHighlight = useCallback(() => {
     if (!stripRef.current) return;
-    const containerRect = slotRef.current.getBoundingClientRect();
-    const centerX = containerRect.left + containerRect.width / 2;
-    const items = stripRef.current.querySelectorAll('.slot-item');
-    let closestItem = null;
-    let minDistance = Infinity;
-    items.forEach((item) => {
-      const rect = item.getBoundingClientRect();
-      const itemCenterX = rect.left + rect.width / 2;
-      const distance = Math.abs(itemCenterX - centerX);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestItem = item;
-      }
-    });
-    if (closestItem && minDistance < itemWidth / 2) {
-      const participantId = parseInt(closestItem.dataset.participantId);
-      const participant = participants.find((p) => p.id === participantId);
+    // Compute the index of the item currently under the central marker
+    // directly from the strip's translation.  This avoids inaccuracies
+    // caused by reading DOM bounding rectangles, which can become stale
+    // during smooth animations.  We add the centre offset so the index
+    // corresponds to the item aligned with the red marker.
+    const currentX = -gsap.getProperty(stripRef.current, 'x');
+    const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemWidth;
+    const rawIndex = Math.round((currentX + centerOffset) / itemWidth);
+    // Wrap the index within the bounds of the participants array
+    const len = participants.length;
+    if (len === 0) return;
+    let participantIndex = rawIndex % len;
+    if (participantIndex < 0) participantIndex += len;
+    const participant = participants[participantIndex];
+    if (participant && participant !== currentHighlight) {
       setCurrentHighlight(participant);
     }
-  }, [participants, itemWidth]);
+  }, [participants, itemWidth, currentHighlight]);
 
   // After the spin completes, emit the winner to the backend via the WebSocket
   // and animate the winning item.  Guard against duplicate notifications
