@@ -439,3 +439,113 @@ input::placeholder, textarea::placeholder {
     font-size: 1rem !important;
   }
 }
+/* Добавьте эти стили в конец вашего index.css */
+
+/* Гарантия видимости элементов во время GSAP анимации */
+.slot-strip {
+  /* Предотвращаем исчезновение во время анимации */
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: flex !important;
+}
+
+/* Фиксы для transform */
+.slot-strip[style*="transform"] {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Убеждаемся, что slot-viewport не скрывает содержимое */
+.slot-viewport {
+  /* Важно: position relative для правильной работы absolute детей */
+  position: relative !important;
+  overflow: hidden !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Фикс для slot-machine во время анимации */
+.slot-machine.spinning .slot-strip {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Предотвращаем clipping во время resize */
+.slot-machine {
+  /* Добавляем небольшой запас для анимации */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+/* Гарантируем видимость slot-item */
+.slot-item {
+  opacity: 1 !important;
+  visibility: visible !important;
+  /* Форсируем рендеринг */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+/* Специальный фикс для iOS Safari */
+@supports (-webkit-touch-callout: none) {
+  .slot-strip {
+    -webkit-transform: translate3d(0, 0, 0);
+    -webkit-backface-visibility: hidden;
+    -webkit-perspective: 1000;
+  }
+  
+  .slot-machine {
+    -webkit-transform-style: preserve-3d;
+  }
+}
+
+/* Debug класс для проверки видимости */
+.slot-debug {
+  border: 2px solid red !important;
+  background: rgba(255, 0, 0, 0.1) !important;
+}
+
+/* Предотвращаем мерцание при старте анимации */
+.slot-machine:not(.spinning) .slot-strip {
+  transition: none !important;
+}
+
+/* Z-index стек для правильного порядка слоев */
+.slot-viewport {
+  z-index: 1;
+}
+
+.slot-strip {
+  z-index: 2;
+}
+
+.slot-overlay-left,
+.slot-overlay-right {
+  z-index: 10;
+}
+
+.slot-marker {
+  z-index: 20;
+}
+
+/* Фикс для Telegram WebView */
+.telegram-container .slot-machine {
+  -webkit-overflow-scrolling: auto !important;
+}
+
+/* Принудительная видимость для мобильных устройств */
+@media (max-width: 768px) {
+  .slot-strip {
+    /* Мобильные браузеры иногда оптимизируют невидимые элементы */
+    will-change: transform;
+    contain: none !important;
+  }
+}
+
+/* Анимация должна работать плавно */
+@media (prefers-reduced-motion: no-preference) {
+  .slot-strip {
+    /* Оптимизация для плавной анимации */
+    will-change: transform;
+  }
+}

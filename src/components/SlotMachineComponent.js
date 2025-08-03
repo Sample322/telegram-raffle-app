@@ -7,13 +7,12 @@ const ITEM_MARGIN = 6; // 3px с каждой стороны
 
 function getDuplicationFactor(speed, participantsLength) {
   const baseMap = {
-    fast: 20,    // Увеличиваем для лучшей бесконечности
+    fast: 20,
     medium: 15,
     slow: 12,
   };
   const base = baseMap[speed] || baseMap.fast;
   const len = participantsLength || 1;
-  // Гарантируем минимум 10 копий для маленьких групп
   const minFactor = Math.max(10, Math.ceil((VISIBLE_ITEMS * 5) / len) + 5);
   return Math.max(base, minFactor);
 }
@@ -39,80 +38,84 @@ const SlotMachineComponent = ({
   const processedMessagesRef = useRef(new Set());
   const isSendingRef = useRef(false);
   const animationRef = useRef(null);
+  const lastWidthRef = useRef(0);
+  const isResizingRef = useRef(false);
 
-  // Более точный расчет ширины элемента с учетом узких экранов
+  // Расчет ширины элемента с обработкой resize
   useEffect(() => {
     function calculateItemWidth() {
       if (!containerRef.current || !slotRef.current) return;
       
-      // Получаем реальную ширину контейнера
       const containerRect = containerRef.current.getBoundingClientRect();
       const containerWidth = containerRect.width;
       
-      // Получаем вычисленные стили
       const containerStyle = window.getComputedStyle(containerRef.current);
       const containerPadding = parseFloat(containerStyle.paddingLeft) + parseFloat(containerStyle.paddingRight);
       
-      // Ширина самой слот-машины
       const slotRect = slotRef.current.getBoundingClientRect();
       const slotWidth = slotRect.width;
       
-      // Рассчитываем доступное пространство
       const availableWidth = Math.min(
         slotWidth,
         containerWidth - containerPadding,
-        window.innerWidth - 32 // Минус минимальные отступы
+        window.innerWidth - 32
       );
       
-      // Вычисляем ширину одного элемента
-      // Учитываем, что нужно показать VISIBLE_ITEMS элементов
       const totalMargins = VISIBLE_ITEMS * ITEM_MARGIN;
       const calculatedItemWidth = Math.floor((availableWidth - totalMargins) / VISIBLE_ITEMS);
       
-      // Устанавливаем минимальную и максимальную ширину
-      const minWidth = 60; // Минимум для читабельности
-      const maxWidth = 120; // Максимум для эстетики
+      const minWidth = 60;
+      const maxWidth = 120;
       const finalWidth = Math.max(minWidth, Math.min(maxWidth, calculatedItemWidth));
       
-      console.log('Slot width calculation:', {
-        containerWidth,
-        slotWidth,
-        availableWidth,
-        calculatedItemWidth,
-        finalWidth
-      });
-      
-      setItemWidth(finalWidth);
-      
-      // Устанавливаем CSS переменную
-      document.documentElement.style.setProperty('--item-width', `${finalWidth}px`);
+      // Проверяем, изменилась ли ширина значительно
+      if (Math.abs(finalWidth - lastWidthRef.current) > 2) {
+        console.log('Item width changed:', {
+          old: lastWidthRef.current,
+          new: finalWidth,
+          containerWidth,
+          slotWidth
+        });
+        
+        lastWidthRef.current = finalWidth;
+        setItemWidth(finalWidth);
+        document.documentElement.style.setProperty('--item-width', `${finalWidth}px`);
+        
+        // Если не анимируем, пересоздаем полосу
+        if (!animationRef.current && stripRef.current) {
+          isResizingRef.current = true;
+          // Сохраняем текущую позицию перед пересозданием
+          const currentX = gsap.getProperty(stripRef.current, 'x');
+          createParticipantStrip(true, currentX);
+        }
+      }
     }
     
-    // Немедленный расчет
     calculateItemWidth();
     
-    // Отложенные расчеты для точности
     const timeouts = [
       setTimeout(calculateItemWidth, 100),
       setTimeout(calculateItemWidth, 300),
       setTimeout(calculateItemWidth, 500)
     ];
     
-    // Обработчик изменения размера
     let resizeTimer;
     const handleResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(calculateItemWidth, 100);
+      if (!animationRef.current) { // Не обрабатываем resize во время анимации
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(calculateItemWidth, 150);
+      }
     };
     
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
     
-    // Наблюдатель за изменением размера
     let resizeObserver;
     if (window.ResizeObserver && containerRef.current) {
       resizeObserver = new ResizeObserver(() => {
-        handleResize();
+        if (!animationRef.current) {
+          handleResize();
+        }
       });
       resizeObserver.observe(containerRef.current);
     }
@@ -138,25 +141,25 @@ const SlotMachineComponent = ({
     }
   }, [currentPrize]);
 
-  // Создание полосы участников с правильной бесконечной прокруткой
-  const createParticipantStrip = useCallback(() => {
+  // Создание полосы участников
+  const createParticipantStrip = useCallback((preservePosition = false, currentX = null) => {
     if (!stripRef.current || participants.length === 0) return;
+    
+    // Маркируем strip для GSAP
+    stripRef.current.setAttribute('data-gsap-animated', 'true');
     
     stripRef.current.innerHTML = '';
     
     const duplicationFactor = getDuplicationFactor(wheelSpeed, participants.length);
     const duplicatedParticipants = [];
     
-    // Создаем массив с дублированными участниками
     for (let i = 0; i < duplicationFactor; i++) {
       duplicatedParticipants.push(...participants);
     }
     
-    // Общая ширина полосы
     const itemFullWidth = itemWidth + ITEM_MARGIN;
     const totalWidth = duplicatedParticipants.length * itemFullWidth;
     
-    // Создаем элементы
     duplicatedParticipants.forEach((participant, index) => {
       const item = document.createElement('div');
       item.className = 'slot-item';
@@ -175,35 +178,44 @@ const SlotMachineComponent = ({
       stripRef.current.appendChild(item);
     });
     
-    // Устанавливаем ширину полосы
     stripRef.current.style.width = `${totalWidth}px`;
     
-    // Позиционируем в середине для бесконечной прокрутки
-    const middlePosition = Math.floor(duplicationFactor / 2) * participants.length * itemFullWidth;
-    
-    // Добавляем смещение для центрирования относительно маркера
-    const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemFullWidth;
-    const startPosition = -middlePosition + centerOffset;
+    let startPosition;
+    if (preservePosition && currentX !== null) {
+      // Пересчитываем позицию с учетом новой ширины элементов
+      const oldItemWidth = lastWidthRef.current || itemWidth;
+      const ratio = itemWidth / oldItemWidth;
+      startPosition = currentX * ratio;
+    } else {
+      const middlePosition = Math.floor(duplicationFactor / 2) * participants.length * itemFullWidth;
+      const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemFullWidth;
+      startPosition = -middlePosition + centerOffset;
+    }
     
     gsap.set(stripRef.current, { 
       x: startPosition,
-      force3D: true
+      force3D: true,
+      transform: `translateX(${startPosition}px) translateZ(0)`,
+      opacity: 1,
+      visibility: 'visible'
     });
     
-    console.log('Strip created:', {
-      participants: participants.length,
-      duplicated: duplicatedParticipants.length,
-      totalWidth,
-      startPosition
-    });
+    // Обновляем подсветку после пересоздания
+    if (preservePosition) {
+      setTimeout(() => {
+        updateHighlight();
+        isResizingRef.current = false;
+      }, 50);
+    }
     
   }, [participants, wheelSpeed, itemWidth]);
 
   // Инициализация полосы
   useEffect(() => {
-    createParticipantStrip();
-    // Небольшая задержка для гарантии правильного обновления
-    setTimeout(() => updateHighlight(), 50);
+    if (!isResizingRef.current) {
+      createParticipantStrip();
+      setTimeout(() => updateHighlight(), 50);
+    }
   }, [createParticipantStrip]);
 
   // Обновление подсвеченного участника
@@ -214,7 +226,6 @@ const SlotMachineComponent = ({
     const itemFullWidth = itemWidth + ITEM_MARGIN;
     const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemFullWidth;
     
-    // Находим индекс элемента под маркером
     const absoluteIndex = Math.round((currentX + centerOffset) / itemFullWidth);
     const participantIndex = ((absoluteIndex % participants.length) + participants.length) % participants.length;
     
@@ -226,11 +237,17 @@ const SlotMachineComponent = ({
     }
   }, [participants, itemWidth]);
 
-  // Запуск вращения с улучшенной логикой
+  // Запуск вращения
   const startSpin = useCallback(() => {
     if (participants.length === 0 || !stripRef.current) return;
     
     hasNotifiedRef.current = false;
+    
+    // Убеждаемся, что strip видим
+    gsap.set(stripRef.current, {
+      opacity: 1,
+      visibility: 'visible'
+    });
     
     const speedSettings = {
       fast: { duration: 4, ease: 'power4.out', spins: 8 },
@@ -241,10 +258,8 @@ const SlotMachineComponent = ({
     const settings = speedSettings[wheelSpeed] || speedSettings.fast;
     const itemFullWidth = itemWidth + ITEM_MARGIN;
     
-    // Текущая позиция
     const currentX = gsap.getProperty(stripRef.current, 'x');
     
-    // Определяем целевую позицию
     let targetIndex;
     if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
       targetIndex = targetWinnerIndex;
@@ -252,15 +267,11 @@ const SlotMachineComponent = ({
       targetIndex = Math.floor(Math.random() * participants.length);
     }
     
-    // Рассчитываем финальную позицию
     const centerOffset = Math.floor(VISIBLE_ITEMS / 2) * itemFullWidth;
     const spinsDistance = settings.spins * participants.length * itemFullWidth;
     
     // Находим ближайший элемент с нужным индексом впереди
     const currentAbsolutePos = -currentX;
-    const targetRelativePos = targetIndex * itemFullWidth;
-    
-    // Вычисляем, сколько нужно прокрутить до ближайшего целевого элемента
     let distanceToTarget = 0;
     let testPos = currentAbsolutePos;
     
@@ -275,29 +286,36 @@ const SlotMachineComponent = ({
     
     const finalPosition = currentX - distanceToTarget;
     
-    console.log('Spin calculation:', {
+    console.log('Starting spin:', {
       targetIndex,
       currentX,
       finalPosition,
-      distance: distanceToTarget,
-      spins: Math.floor(distanceToTarget / (participants.length * itemFullWidth))
+      distance: distanceToTarget
     });
     
-    // Убиваем предыдущую анимацию
     if (animationRef.current) {
       animationRef.current.kill();
     }
     
-    // Создаем новую анимацию
     animationRef.current = gsap.timeline({ 
       onUpdate: updateHighlight, 
-      onComplete: handleSpinComplete 
+      onComplete: () => {
+        animationRef.current = null;
+        handleSpinComplete();
+      }
+    })
+    .set(stripRef.current, {
+      opacity: 1,
+      visibility: 'visible'
     })
     .to(stripRef.current, {
       x: finalPosition,
       duration: settings.duration,
       ease: settings.ease,
-      force3D: true
+      force3D: true,
+      onStart: () => {
+        console.log('Animation started');
+      }
     })
     .to('.slot-machine', {
       className: '+=spinning',
@@ -315,10 +333,8 @@ const SlotMachineComponent = ({
     if (!hasNotifiedRef.current && currentPrize && socket) {
       hasNotifiedRef.current = true;
       
-      // Финальное обновление позиции
       updateHighlight();
       
-      // Используем текущий highlighted участник как победителя
       const winner = currentHighlight || participants[0];
       
       if (winner && socket.readyState === WebSocket.OPEN) {
@@ -341,7 +357,6 @@ const SlotMachineComponent = ({
           console.log('Sending winner to server:', message);
           socket.send(JSON.stringify(message));
           
-          // Подсвечиваем все элементы победителя
           const winnerElements = stripRef.current.querySelectorAll(`[data-participant-id="${winner.id}"]`);
           winnerElements.forEach(el => el.classList.add('winner'));
           
@@ -364,6 +379,16 @@ const SlotMachineComponent = ({
       animationRef.current = null;
     }
   }, [isSpinning, startSpin]);
+
+  // Проверка видимости при монтировании
+  useEffect(() => {
+    if (stripRef.current) {
+      gsap.set(stripRef.current, {
+        opacity: 1,
+        visibility: 'visible'
+      });
+    }
+  }, []);
 
   return (
     <div className="slot-machine-container" ref={containerRef}>
