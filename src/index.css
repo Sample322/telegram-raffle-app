@@ -232,3 +232,87 @@ input, textarea, select {
 input::placeholder, textarea::placeholder {
   color: #9ca3af;
 }
+/* Добавьте эти стили в конец вашего index.css */
+
+/* Исправления для слот-машины в Telegram Mini App */
+.slot-machine-wrapper {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+/* Принудительное ограничение ширины для всех flex-контейнеров */
+.telegram-container * {
+  max-width: 100%;
+}
+
+/* Исправление для flex-элементов */
+.telegram-container .flex {
+  min-width: 0; /* Критично для правильной работы flex */
+}
+
+/* Специфичные исправления для слот-машины */
+.slot-machine-container {
+  contain: layout style;
+}
+
+/* Предотвращение горизонтального скролла на iOS */
+@supports (-webkit-touch-callout: none) {
+  body {
+    position: fixed;
+    width: 100%;
+  }
+  
+  .telegram-container {
+    height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Исправления для маленьких экранов */
+@media (max-width: 400px) {
+  .container {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  
+  .p-4 {
+    padding: 0.75rem;
+  }
+  
+  .p-6 {
+    padding: 1rem;
+  }
+  
+  /* Уменьшаем размеры текста на маленьких экранах */
+  .text-xl {
+    font-size: 1.125rem;
+  }
+  
+  .text-2xl {
+    font-size: 1.375rem;
+  }
+  
+  .text-3xl {
+    font-size: 1.625rem;
+  }
+}
+
+/* Фикс для GSAP анимаций */
+[data-gsap-animated] {
+  will-change: transform;
+  transform: translateZ(0); /* Принудительное GPU ускорение */
+}
+
+/* Убираем лишние тени на мобильных для производительности */
+@media (max-width: 768px) and (hover: none) {
+  .shadow-lg {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+  
+  .shadow-2xl {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  }
+}

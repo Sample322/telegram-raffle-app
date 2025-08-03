@@ -296,46 +296,59 @@ function LiveRafflePage() {
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Wheel/Slot Section */}
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg p-4 md:p-8 shadow-2xl overflow-hidden">
-                {wheelParticipants.length > 0 ? (
-                  raffle?.display_type === 'slot' ? (
-                    <SlotMachineComponent
-                      participants={wheelParticipants}
-                      isSpinning={isSpinning}
-                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                      socket={socket}
-                      raffleId={id}
-                      wheelSpeed={raffle?.wheel_speed || 'fast'}
-                      targetWinnerIndex={currentRound?.target_winner_index}
-                      onComplete={(winner) => console.log('Winner selected:', winner)}
-                    />
-                  ) : (
-                    <WheelComponent
-                      participants={wheelParticipants}
-                      isSpinning={isSpinning}
-                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                      socket={socket}
-                      raffleId={id}
-                      wheelSpeed={raffle?.wheel_speed || 'fast'}
-                      targetAngle={currentRound?.targetAngle}
-                      onComplete={(winner) => console.log('Winner selected:', winner)}
-                    />
-                  )
+          // Замените секцию с Wheel/Slot в LiveRafflePage.js на эту:
+
+        {/* Wheel/Slot Section */}
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-lg shadow-2xl" style={{ 
+            maxWidth: '100%', 
+            overflow: 'hidden',
+            // Важно: не добавляем padding напрямую к контейнеру со слот-машиной
+          }}>
+            {/* Внутренний контейнер для правильного spacing */}
+            <div className="p-4 md:p-6" style={{ 
+              width: '100%',
+              minWidth: 0, // Критично для flex children
+              overflow: 'hidden'
+            }}>
+              {wheelParticipants.length > 0 ? (
+                raffle?.display_type === 'slot' ? (
+                  <SlotMachineComponent
+                    participants={wheelParticipants}
+                    isSpinning={isSpinning}
+                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                    socket={socket}
+                    raffleId={id}
+                    wheelSpeed={raffle?.wheel_speed || 'fast'}
+                    targetWinnerIndex={currentRound?.target_winner_index}
+                    onComplete={(winner) => console.log('Winner selected:', winner)}
+                  />
                 ) : (
-                  <div className="text-center text-gray-600 py-20">
-                    <p className="text-xl mb-4">Ожидание участников...</p>
-                    <p>Текущее количество участников: {participants.length}</p>
-                    {participants.length < Object.keys(raffle.prizes).length && (
-                      <p className="text-sm text-red-600 mt-2">
-                        Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                  <WheelComponent
+                    participants={wheelParticipants}
+                    isSpinning={isSpinning}
+                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                    socket={socket}
+                    raffleId={id}
+                    wheelSpeed={raffle?.wheel_speed || 'fast'}
+                    targetAngle={currentRound?.targetAngle}
+                    onComplete={(winner) => console.log('Winner selected:', winner)}
+                  />
+                )
+              ) : (
+                <div className="text-center text-gray-600 py-20">
+                  <p className="text-xl mb-4">Ожидание участников...</p>
+                  <p>Текущее количество участников: {participants.length}</p>
+                  {participants.length < Object.keys(raffle.prizes).length && (
+                    <p className="text-sm text-red-600 mt-2">
+                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
+          </div>
+        </div>
 
           {/* Winners Table */}
           <div className="bg-white/10 backdrop-blur rounded-lg p-6">
