@@ -4,7 +4,7 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import WheelComponent from '../components/WheelComponent';
 import { toast } from 'react-hot-toast';
-
+import SlotMachineComponent from '../components/SlotMachineComponent';
 function LiveRafflePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -296,33 +296,46 @@ function LiveRafflePage() {
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Wheel Section */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg p-8 shadow-2xl">
-              {wheelParticipants.length > 0 ? (
-                <WheelComponent
-                  participants={wheelParticipants}
-                  isSpinning={isSpinning}
-                  currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                  socket={socket}
-                  raffleId={id}
-                  wheelSpeed={raffle?.wheel_speed || 'fast'}
-                  targetAngle={currentRound?.targetAngle}  // Передаём целевой угол
-                  onComplete={(winner) => console.log('Winner selected:', winner)}
-                />
-              ) : (
-                <div className="text-center text-gray-600 py-20">
-                  <p className="text-xl mb-4">Ожидание участников...</p>
-                  <p>Текущее количество участников: {participants.length}</p>
-                  {participants.length < Object.keys(raffle.prizes).length && (
-                    <p className="text-sm text-red-600 mt-2">
-                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
-                    </p>
-                  )}
-                </div>
-              )}
+          {/* Wheel/Slot Section */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-lg p-8 shadow-2xl">
+                {wheelParticipants.length > 0 ? (
+                  raffle?.display_type === 'slot' ? (
+                    <SlotMachineComponent
+                      participants={wheelParticipants}
+                      isSpinning={isSpinning}
+                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                      socket={socket}
+                      raffleId={id}
+                      wheelSpeed={raffle?.wheel_speed || 'fast'}
+                      targetWinnerIndex={currentRound?.target_winner_index}
+                      onComplete={(winner) => console.log('Winner selected:', winner)}
+                    />
+                  ) : (
+                    <WheelComponent
+                      participants={wheelParticipants}
+                      isSpinning={isSpinning}
+                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                      socket={socket}
+                      raffleId={id}
+                      wheelSpeed={raffle?.wheel_speed || 'fast'}
+                      targetAngle={currentRound?.targetAngle}
+                      onComplete={(winner) => console.log('Winner selected:', winner)}
+                    />
+                  )
+                ) : (
+                  <div className="text-center text-gray-600 py-20">
+                    <p className="text-xl mb-4">Ожидание участников...</p>
+                    <p>Текущее количество участников: {participants.length}</p>
+                    {participants.length < Object.keys(raffle.prizes).length && (
+                      <p className="text-sm text-red-600 mt-2">
+                        Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
           {/* Winners Table */}
           <div className="bg-white/10 backdrop-blur rounded-lg p-6">
