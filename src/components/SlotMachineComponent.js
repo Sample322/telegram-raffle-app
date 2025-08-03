@@ -16,7 +16,33 @@ function getDuplicationFactor(speed, participantsLength) {
   const minFactor = Math.max(10, Math.ceil((VISIBLE_ITEMS * 5) / len) + 5);
   return Math.max(base, minFactor);
 }
-
+const checkElementVisibility = (element, name) => {
+  if (!element) {
+    console.error(`${name} is null`);
+    return;
+  }
+  
+  const rect = element.getBoundingClientRect();
+  const computed = window.getComputedStyle(element);
+  
+  console.log(`${name} visibility check:`, {
+    display: computed.display,
+    visibility: computed.visibility,
+    opacity: computed.opacity,
+    transform: computed.transform,
+    position: computed.position,
+    overflow: computed.overflow,
+    rect: {
+      width: rect.width,
+      height: rect.height,
+      top: rect.top,
+      left: rect.left
+    },
+    offsetParent: element.offsetParent ? 'exists' : 'null',
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight
+  });
+};
 const SlotMachineComponent = ({
   participants,
   isSpinning,
@@ -372,13 +398,19 @@ const SlotMachineComponent = ({
 
   // Управление анимацией
   useEffect(() => {
-    if (isSpinning && !animationRef.current) {
-      startSpin();
-    } else if (!isSpinning && animationRef.current) {
-      animationRef.current.kill();
-      animationRef.current = null;
+  if (isSpinning && stripRef.current) {
+    console.log('=== Animation starting - visibility check ===');
+    checkElementVisibility(containerRef.current, 'Container');
+    checkElementVisibility(slotRef.current, 'Slot Machine');
+    checkElementVisibility(stripRef.current, 'Strip');
+    
+    // Проверяем первый элемент
+    const firstItem = stripRef.current.querySelector('.slot-item');
+    if (firstItem) {
+      checkElementVisibility(firstItem, 'First Item');
     }
-  }, [isSpinning, startSpin]);
+  }
+}, [isSpinning]);
 
   // Проверка видимости при монтировании
   useEffect(() => {
