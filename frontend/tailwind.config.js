@@ -26,6 +26,7 @@ module.exports = {
       },
       screens: {
         'xs': '375px',
+        'tg': '420px',
       },
       spacing: {
         'safe-top': 'env(safe-area-inset-top)',

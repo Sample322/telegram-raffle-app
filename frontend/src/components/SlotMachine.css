@@ -32,9 +32,11 @@
    * horizontal scrolling.  Setting min-width: 0 allows the slot machine
    * container to shrink within its parent without overflowing the mini‑app
    * window. */
-  max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  /* Ограничения для Telegram viewport */
+  max-width: min(100%, 600px); /* Максимум 600px или 100% ширины */
+  margin: 0 auto; /* Центрирование */
 }
 
 /* Current highlight */

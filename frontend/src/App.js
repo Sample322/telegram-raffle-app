@@ -9,7 +9,7 @@ import RafflePage from './pages/RafflePage';
 import LiveRafflePage from './pages/LiveRafflePage';
 import RaffleHistoryPage from './pages/RaffleHistoryPage';
 import AdminPanel from './pages/AdminPanel';
-
+import { useTelegramViewport } from './hooks/useTelegramViewport';
 // Context
 import { AuthProvider } from './contexts/AuthContext';
 
@@ -19,7 +19,8 @@ import api from './services/api';
 function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-
+  // Настройка viewport для Telegram
+  useTelegramViewport();
   useEffect(() => {
     // Initialize Telegram WebApp
     WebApp.ready();
@@ -66,7 +67,7 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 telegram-container">
           <Toaster position="top-center" />
           <Routes>
             <Route path="/" element={<HomePage />} />

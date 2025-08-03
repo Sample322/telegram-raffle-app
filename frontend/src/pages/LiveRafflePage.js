@@ -286,7 +286,7 @@ function LiveRafflePage() {
         </div>
       </div>
 
-      <div className="container mx-auto p-4">
+      <div className="container mx-auto p-4 max-w-full overflow-x-hidden">
         {/* Countdown display */}
         {countdown && countdown > 0 && (
           <div className="text-center mb-8 animate-pulse">
@@ -298,7 +298,7 @@ function LiveRafflePage() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Wheel/Slot Section */}
             <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg p-8 shadow-2xl">
+              <div className="bg-white rounded-lg p-4 md:p-8 shadow-2xl overflow-hidden">
                 {wheelParticipants.length > 0 ? (
                   raffle?.display_type === 'slot' ? (
                     <SlotMachineComponent
