@@ -119,6 +119,21 @@ function LiveRafflePage() {
           break;
          
         case 'winner_confirmed':
+          // Проверяем, не обработали ли мы уже этого победителя
+          const winnerKey = `${data.position}_${data.winner.id}`;
+          const processedWinnersKey = `processed_winners_${id}`;
+          
+          if (!window[processedWinnersKey]) {
+            window[processedWinnersKey] = new Set();
+          }
+          
+          if (window[processedWinnersKey].has(winnerKey)) {
+            console.log('Duplicate winner notification ignored:', winnerKey);
+            break;
+          }
+          
+          window[processedWinnersKey].add(winnerKey);
+          
           setWinners(prev => {
             const updated = [...prev];
             const existingIndex = updated.findIndex(w => w.position === data.position);
@@ -129,8 +144,13 @@ function LiveRafflePage() {
             }
             return updated;
           });
+          
           setIsSpinning(false);
-          toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
+          
+          // Показываем уведомление только один раз
+          if (!data.auto_selected) {
+            toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
+          }
           break;
                     // В switch statement для ws.onmessage добавить:
           case 'round_complete':

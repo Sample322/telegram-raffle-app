@@ -549,3 +549,63 @@ input::placeholder, textarea::placeholder {
     will-change: transform;
   }
 }
+/* Добавьте эти стили в САМЫЙ КОНЕЦ вашего index.css */
+
+/* GSAP анимация - критические исправления */
+.slot-strip {
+  /* Убеждаемся что strip виден */
+  opacity: 1 !important;
+  visibility: visible !important;
+  
+  /* Фиксируем позиционирование */
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  
+  /* Убираем любые transform кроме тех что устанавливает GSAP */
+  transform: none;
+}
+
+/* Когда GSAP применяет transform, сохраняем видимость */
+.slot-strip[style*="transform"] {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Фикс для viewport */
+.slot-viewport {
+  position: relative !important;
+  overflow: hidden !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Убеждаемся что элементы видны */
+.slot-item {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Отключаем contain для slot-machine-container */
+.slot-machine-container {
+  contain: none !important;
+}
+
+/* Фикс для iOS */
+@supports (-webkit-touch-callout: none) {
+  .slot-strip {
+    -webkit-transform-style: flat !important;
+  }
+}
+
+/* Debug - раскомментируйте для отладки */
+/*
+.slot-machine {
+  overflow: visible !important;
+  border: 2px solid red !important;
+}
+
+.slot-strip {
+  border: 2px solid blue !important;
+}
+*/
