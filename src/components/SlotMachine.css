@@ -313,3 +313,91 @@
   opacity: 1 !important;
   visibility: visible !important;
 }
+/* Добавьте эти стили в конец SlotMachine.css для исправления синхронизации на мобильных */
+
+/* Фиксируем позицию маркера точно по центру */
+.slot-marker {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(to bottom, #e74c3c, #c0392b);
+  z-index: 20;
+  box-shadow: 0 0 20px rgba(231, 76, 60, 0.8);
+  pointer-events: none;
+}
+
+/* Убеждаемся что viewport имеет правильные размеры на всех экранах */
+.slot-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Убираем любые padding которые могут сбить расчеты */
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Фиксируем размеры slot-machine на мобильных */
+@media (max-width: 768px) {
+  .slot-machine {
+    position: relative;
+    width: 100%;
+    height: 90px; /* Фиксированная высота */
+    /* Убираем padding и margin */
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+  }
+  
+  /* Гарантируем что элементы имеют правильный размер */
+  .slot-item {
+    /* Размер будет установлен через переменную */
+    width: var(--item-width, 70px);
+    min-width: var(--item-width, 70px);
+    max-width: var(--item-width, 70px);
+    height: 60px;
+    margin: 0 3px; /* Фиксированные отступы */
+    box-sizing: border-box;
+  }
+}
+
+/* Специальные правила для очень узких экранов */
+@media (max-width: 400px) {
+  .slot-machine {
+    height: 80px;
+  }
+  
+  .slot-item {
+    height: 55px;
+    margin: 0 2px; /* Еще меньше отступы */
+  }
+  
+  /* Уменьшаем размер шрифта */
+  .participant-name {
+    font-size: 0.7rem;
+  }
+}
+
+/* Debug стили для проверки центрирования - раскомментируйте при необходимости */
+/*
+.slot-marker {
+  background: red !important;
+  width: 5px !important;
+  opacity: 0.8 !important;
+}
+
+.slot-viewport::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: blue;
+  z-index: 25;
+  transform: translateX(-50%);
+}
+*/
