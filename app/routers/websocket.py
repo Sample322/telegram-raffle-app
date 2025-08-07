@@ -96,7 +96,7 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                     logger.error(f"No participants left for position {position}")
                     break
 
-                # сервер выбирает случайного победителя
+                            # сервер выбирает случайного победителя
                 winner_index = random.randint(0, len(remaining_participants) - 1)
                 winner = remaining_participants[winner_index]
                 winner_data = {
@@ -106,25 +106,19 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                     "last_name": winner.last_name
                 }
 
-                # индекс победителя в общем списке (для анимации)
-                # индекс победителя в общем списке (для анимации)
-                display_index = next(
-                    (i for i, p in enumerate(state['participant_list']) if p['id'] == winner.telegram_id),
-                    0
-                )
-
                 # Логируем для отладки
-                logger.info(f"Winner {winner.username} (id={winner.telegram_id}) at index {display_index} of {len(state['participant_list'])} participants")
+                logger.info(f"Position {position}: Selected winner {winner.username} (id={winner.telegram_id})")
+                logger.info(f"Remaining participants: {[p.telegram_id for p in remaining_participants]}")
 
-                # отправляем клиентам событие wheel_start с predetermined_winner
+                # отправляем клиентам событие wheel_start с ID победителя (не индекс!)
                 await manager.broadcast({
                     "type": "wheel_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
                     "participants": state['participant_list'],
-                    "predetermined_winner_index": display_index,
+                    "predetermined_winner_id": winner.telegram_id,  # Отправляем ID, не индекс!
                     "predetermined_winner": winner_data,
-                    "total_participants": len(state['participant_list'])
+                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants]  # Для отладки
                 }, raffle_id)
 
                 # ждём окончания анимации
