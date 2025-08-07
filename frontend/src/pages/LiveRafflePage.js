@@ -3,434 +3,400 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import WheelComponent from '../components/WheelComponent';
-import { toast } from 'react-hot-toast';
 import SlotMachineComponent from '../components/SlotMachineComponent';
+import { toast } from 'react-hot-toast';
+
+/**
+ * LiveRafflePage displays a real‑time raffle to the user. It fetches the
+ * raffle details, subscribes to live WebSocket events and renders either
+ * a spinning wheel or a slot machine depending on the raffle's display
+ * type. The page also shows the list of prizes, highlights the current
+ * round and indicates the overall connection status.
+ */
 function LiveRafflePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+
+  // State for raffle metadata and participants
   const [raffle, setRaffle] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [currentRound, setCurrentRound] = useState(null);
   const [winners, setWinners] = useState([]);
+
+  // UI state
   const [isSpinning, setIsSpinning] = useState(false);
   const [socket, setSocket] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
-  useEffect(() => {
-    loadRaffleData();
-    connectWebSocket();
 
+  // Fetch raffle and participant data when the page mounts or id changes
+  useEffect(() => {
+    async function loadRaffleData() {
+      try {
+        const [raffleRes, participantsRes] = await Promise.all([
+          api.get(`/raffles/${id}`),
+          api.get(`/raffles/${id}/participants`),
+        ]);
+        setRaffle(raffleRes.data);
+        setParticipants(participantsRes.data);
+
+        // If the raffle is already completed, fetch winners
+        if (raffleRes.data.is_completed) {
+          const completedRes = await api.get('/raffles/completed?limit=50');
+          const completedRaffle = completedRes.data.find((r) => r.id === Number(id));
+          if (completedRaffle && completedRaffle.winners) {
+            setWinners(completedRaffle.winners);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading raffle:', error);
+        toast.error('Ошибка загрузки розыгрыша');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function connectWebSocket() {
+      const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
+      const ws = new WebSocket(wsUrl);
+      setConnectionStatus('connecting');
+
+      ws.onopen = () => {
+        setConnectionStatus('connected');
+        // Keep the connection alive with periodic pings
+        const pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000);
+        ws.pingInterval = pingInterval;
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        switch (data.type) {
+          case 'connection_established':
+            if (data.raffle.is_completed) {
+              setConnectionStatus('completed');
+            }
+            break;
+          case 'raffle_starting':
+            toast.success('Розыгрыш начинается!');
+            break;
+          case 'wheel_start': {
+            // Determine the participant order sent by the server or fall back to the current participant list
+            let orderedParticipants = [];
+            if (data.participant_order && data.participant_order.length > 0) {
+              orderedParticipants = data.participant_order
+                .map((tid) => data.participants.find((p) => p.id === tid))
+                .filter(Boolean);
+            } else {
+              orderedParticipants = data.participants;
+            }
+            setCurrentRound({
+              position: data.position,
+              prize: data.prize,
+              participants: orderedParticipants,
+              targetAngle: data.target_angle,
+            });
+            setIsSpinning(true);
+            toast(`🎰 Разыгрывается ${data.position} место!`);
+            break;
+          }
+          case 'winner_confirmed': {
+            // Avoid processing duplicate winner notifications
+            const winnerKey = `${data.position}_${data.winner.id}`;
+            const processedKey = `processed_winners_${id}`;
+            if (!window[processedKey]) {
+              window[processedKey] = new Set();
+            }
+            if (window[processedKey].has(winnerKey)) {
+              break;
+            }
+            window[processedKey].add(winnerKey);
+            setWinners((prev) => {
+              const updated = [...prev];
+              const idx = updated.findIndex((w) => w.position === data.position);
+              if (idx >= 0) {
+                updated[idx] = data;
+              } else {
+                updated.push(data);
+              }
+              return updated;
+            });
+            setIsSpinning(false);
+            if (!data.auto_selected) {
+              toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
+            }
+            break;
+          }
+          case 'round_complete': {
+            // Reset current round when a round is complete
+            setCurrentRound((prev) => {
+              if (prev && prev.position === data.position) {
+                return null;
+              }
+              return prev;
+            });
+            setIsSpinning(false);
+            // Remove the winner from the participants list for subsequent rounds
+            if (data.winner_id) {
+              setParticipants((prev) => prev.filter((p) => p.telegram_id !== data.winner_id));
+            }
+            break;
+          }
+          case 'raffle_complete':
+            setWinners(data.winners);
+            setConnectionStatus('completed');
+            setCurrentRound(null);
+            setIsSpinning(false);
+            toast.success('🎊 Розыгрыш завершен!');
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+          case 'countdown':
+            setCountdown(data.seconds);
+            break;
+          case 'error':
+            toast.error(data.message);
+            break;
+          default:
+            break;
+        }
+      };
+
+      ws.onerror = () => {
+        setConnectionStatus('error');
+        toast.error('Ошибка подключения');
+      };
+
+      ws.onclose = () => {
+        // Clear ping interval
+        if (ws.pingInterval) {
+          clearInterval(ws.pingInterval);
+        }
+        setConnectionStatus('disconnected');
+        // Attempt to reconnect if the raffle is not completed
+        if (!raffle?.is_completed) {
+          setTimeout(() => {
+            connectWebSocket();
+          }, 5000);
+        }
+      };
+
+      setSocket(ws);
+      // Return the created WebSocket instance so callers can manage its lifecycle.
+      return ws;
+    }
+
+    // Initial data fetch and socket connection.
+    // We avoid capturing `socket` from state in this effect to prevent
+    // unnecessary re‑runs when it changes. Instead, we track the WebSocket
+    // instance in a local variable and clean it up on unmount.
+    loadRaffleData();
+    const wsInstance = connectWebSocket();
+    // Cleanup on unmount
     return () => {
-      if (socket) {
-        socket.close();
+      if (wsInstance) {
+        wsInstance.close();
       }
     };
   }, [id]);
 
-  const loadRaffleData = async () => {
-    try {
-      const [raffleRes, participantsRes] = await Promise.all([
-        api.get(`/raffles/${id}`),
-        api.get(`/raffles/${id}/participants`)
-      ]);
-      
-      setRaffle(raffleRes.data);
-      setParticipants(participantsRes.data);
-      
-      // Check if we have any previous winners
-      if (raffleRes.data.is_completed) {
-        const completedRes = await api.get('/raffles/completed?limit=50');
-        const completedRaffle = completedRes.data.find(r => r.id === parseInt(id));
-        if (completedRaffle && completedRaffle.winners) {
-          setWinners(completedRaffle.winners);
-        }
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading raffle:', error);
-      toast.error('Ошибка загрузки розыгрыша');
-      setLoading(false);
-    }
-  };
-
-  const connectWebSocket = () => {
-    const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
-    console.log('Connecting to WebSocket:', wsUrl);
-    
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log('Connected to WebSocket');
-      setConnectionStatus('connected');
-      
-      // Send ping every 30 seconds to keep connection alive
-      const pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 30000);
-      
-      ws.pingInterval = pingInterval;
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('WebSocket message:', data);
-      
-      switch (data.type) {
-        case 'connection_established':
-          if (data.raffle.is_completed) {
-            setConnectionStatus('completed');
-          }
-          break;
-          
-        case 'raffle_starting':
-          toast.success('Розыгрыш начинается!');
-          break;
-          
-        case 'wheel_start':
-          let orderedParticipants = [];
-          if (data.participant_order && data.participant_order.length > 0) {
-            orderedParticipants = data.participant_order.map(tid => {
-              const participant = data.participants.find(p => p.id === tid);
-              if (!participant) {
-                console.error(`Participant with id ${tid} not found in participants list`);
-              }
-              return participant;
-            }).filter(Boolean);
-          } else {
-            console.error('No participant_order received from backend!');
-            orderedParticipants = data.participants;
-          }
-          
-          console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
-          console.log('Target angle from server:', data.target_angle);
-        
-          setCurrentRound({
-            position: data.position,
-            prize: data.prize,
-            participants: orderedParticipants,
-            targetAngle: data.target_angle  // Сохраняем целевой угол
-          });
-          setIsSpinning(true);
-          toast(`🎰 Разыгрывается ${data.position} место!`);
-          break;
-         
-        case 'winner_confirmed':
-          // Проверяем, не обработали ли мы уже этого победителя
-          const winnerKey = `${data.position}_${data.winner.id}`;
-          const processedWinnersKey = `processed_winners_${id}`;
-          
-          if (!window[processedWinnersKey]) {
-            window[processedWinnersKey] = new Set();
-          }
-          
-          if (window[processedWinnersKey].has(winnerKey)) {
-            console.log('Duplicate winner notification ignored:', winnerKey);
-            break;
-          }
-          
-          window[processedWinnersKey].add(winnerKey);
-          
-          setWinners(prev => {
-            const updated = [...prev];
-            const existingIndex = updated.findIndex(w => w.position === data.position);
-            if (existingIndex >= 0) {
-              updated[existingIndex] = data;
-            } else {
-              updated.push(data);
-            }
-            return updated;
-          });
-          
-          setIsSpinning(false);
-          
-          // Показываем уведомление только один раз
-          if (!data.auto_selected) {
-            toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
-          }
-          break;
-                    // В switch statement для ws.onmessage добавить:
-          case 'round_complete':
-            console.log(`Round ${data.position} completed`);
-            // Обновляем состояние для следующего раунда
-          setCurrentRound(prev => {
-            if (prev && prev.position === data.position) {
-              return null; // Сбрасываем только если это тот же раунд
-            }
-            return prev;
-          });
-          setIsSpinning(false);
-          // Обновляем участников, исключая победителя
-          if (data.winner_id) {
-            setParticipants(prev => prev.filter(p => p.telegram_id !== data.winner_id));
-          }
-            break;
-        case 'raffle_complete':
-          setWinners(data.winners);
-          setConnectionStatus('completed');
-          setCurrentRound(null);
-          setIsSpinning(false);
-          toast.success('🎊 Розыгрыш завершен!');
-          // Отключаем WebSocket после завершения
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.close();}
-          break;
-          
-        case 'countdown':
-          setCountdown(data.seconds);
-          break;
-          
-        case 'error':
-          toast.error(data.message);
-          break;
-          
-        default:
-          break;
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setConnectionStatus('error');
-      toast.error('Ошибка подключения');
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnectionStatus('disconnected');
-      
-      // Clear ping interval
-      if (ws.pingInterval) {
-        clearInterval(ws.pingInterval);
-      }
-      
-      // Try to reconnect after 5 seconds if raffle is not completed
-      if (!raffle?.is_completed) {
-        setTimeout(() => {
-          console.log('Attempting to reconnect...');
-          connectWebSocket();
-        }, 5000);
-      }
-    };
-
-    setSocket(ws);
-  };
-
+  /**
+   * Helper to format a countdown in seconds into mm:ss.
+   * @param {number} seconds
+   */
   const formatCountdown = (seconds) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Show a loading state while fetching data
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-purple-600 to-blue-600">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white">Загрузка розыгрыша...</p>
-        </div>
+      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+        <p className="text-xl font-medium">Загрузка розыгрыша...</p>
       </div>
     );
   }
 
+  // Show a not found message if the raffle doesn't exist
   if (!raffle) {
     return (
-      <div className="min-h-screen bg-gray-50 p-4">
-        <div className="container mx-auto text-center">
-          <p className="text-gray-600">Розыгрыш не найден</p>
+      <div className="flex flex-col items-center justify-center h-full p-4 text-center space-y-4">
+        <p className="text-xl font-medium">Розыгрыш не найден</p>
+        <button
+          onClick={() => navigate('/')}
+          className="mt-2 text-blue-600 hover:underline"
+        >
+          Вернуться на главную
+        </button>
+      </div>
+    );
+  }
+
+  // Filter out participants who have already won
+  const eliminatedIds = winners.map(
+    (w) => w.winner?.id || w.user?.telegram_id || w.user?.id
+  );
+  const wheelParticipants =
+    (currentRound?.participants ||
+      participants.map((p) => ({
+        id: p.telegram_id,
+        username: p.username,
+        first_name: p.first_name,
+        last_name: p.last_name,
+      })))
+      .filter((p) => !eliminatedIds.includes(p.id));
+
+  return (
+    <div className="p-4 space-y-6">
+      {/* Navigation Header */}
+      <div className="flex items-center space-x-2">
+        <button
+          onClick={() => navigate('/')}
+          className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
+          aria-label="Назад"
+        >
+          <ArrowLeftIcon className="w-5 h-5" />
+        </button>
+        <h1 className="text-2xl font-semibold truncate">{raffle.title}</h1>
+        <div className="ml-auto text-sm font-medium">
+          {connectionStatus === 'connected'
+            ? 'Подключено'
+            : connectionStatus === 'error'
+            ? 'Ошибка'
+            : connectionStatus === 'completed'
+            ? 'Завершен'
+            : 'Подключение...'}
+        </div>
+      </div>
+
+      {/* Countdown display */}
+      {countdown && countdown > 0 && (
+        <p className="text-center text-lg">
+          🎰 Розыгрыш начнется через: <strong>{formatCountdown(countdown)}</strong>
+        </p>
+      )}
+
+      {/* Wheel/Slot Section */}
+      <div className="flex justify-center">
+        {wheelParticipants.length > 0 ? (
+          raffle?.display_type === 'slot' ? (
+            <SlotMachineComponent
+              participants={wheelParticipants}
+              isSpinning={isSpinning}
+              onComplete={(winner) => {
+                // The slot component internally emits events via WebSocket
+                console.log('Winner selected:', winner);
+              }}
+              currentPrize={currentRound?.prize}
+              socket={socket}
+              raffleId={id}
+              wheelSpeed={raffle?.wheel_speed || 'fast'}
+              targetWinnerIndex={null}
+            />
+          ) : (
+            <WheelComponent
+              participants={wheelParticipants}
+              isSpinning={isSpinning}
+              onComplete={(winner) => {
+                console.log('Winner selected:', winner);
+              }}
+              currentPrize={currentRound?.prize}
+              socket={socket}
+              raffleId={id}
+              wheelSpeed={raffle?.wheel_speed || 'fast'}
+              targetAngle={currentRound?.targetAngle}
+            />
+          )
+        ) : (
+          <div className="text-center space-y-2">
+            <p>Ожидание участников...</p>
+            <p>
+              Текущее количество участников: {participants.length}
+              {participants.length < Object.keys(raffle.prizes).length && (
+                <span>
+                  <br />Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                </span>
+              )}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Winners Table */}
+      <div className="overflow-x-auto">
+        <h2 className="text-xl font-semibold mb-2">🏆 Призовые места</h2>
+        <table className="min-w-full text-left text-sm border border-gray-200">
+          <tbody>
+            {Object.entries(raffle.prizes)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([position, prize]) => {
+                const winner = winners.find((w) => w.position === Number(position));
+                const isCurrentRound = currentRound?.position === Number(position);
+                const medal =
+                  position === '1'
+                    ? '🥇'
+                    : position === '2'
+                    ? '🥈'
+                    : position === '3'
+                    ? '🥉'
+                    : '';
+                return (
+                  <tr
+                    key={position}
+                    className={
+                      isCurrentRound
+                        ? 'bg-yellow-100'
+                        : winner
+                        ? 'bg-green-50'
+                        : ''
+                    }
+                  >
+                    <td className="px-2 py-1 font-medium">
+                      {position} место {medal}
+                    </td>
+                    <td className="px-2 py-1">{prize}</td>
+                    <td className="px-2 py-1">
+                      {winner ? (
+                        <span>
+                          🎉 @
+                          {winner.winner?.username || winner.user?.username || 'Победитель'}
+                        </span>
+                      ) : isCurrentRound ? (
+                        <span>🎰 Разыгрывается...</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Participants Count */}
+      <div className="text-sm">
+        👥 Всего участников: <strong>{participants.length}</strong>
+      </div>
+
+      {/* Completed message */}
+      {connectionStatus === 'completed' && (
+        <div className="space-y-2 text-center">
+          <p className="text-lg">🎊 Розыгрыш завершен!</p>
+          <p>Поздравляем всех победителей!</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-4 text-blue-600 hover:underline"
+            className="bg-white text-purple-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
           >
             Вернуться на главную
           </button>
         </div>
-      </div>
-    );
-  }
-
-  /* -------------------------------------------------------------
-   Формируем список участников для колеса,
-   исключая тех, кто уже есть в winners.
-------------------------------------------------------------- */
-
-  const eliminatedIds = winners.map(
-    w => (
-      (w.winner?.id) ||          // если winner приходит так
-      (w.user?.telegram_id) ||   // или так
-      (w.user?.id)               // или так
-    )
-  );
-
-  const wheelParticipants =
-    (currentRound?.participants || participants.map(p => ({
-      id: p.telegram_id,
-      username: p.username,
-      first_name: p.first_name,
-      last_name: p.last_name
-    })))
-    .filter(p => !eliminatedIds.includes(p.id));
-
-
-// Замените весь return блок в LiveRafflePage.js начиная с <div className="min-h-screen...
-
-return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 text-white">
-      {/* Navigation Header */}
-      <div className="sticky top-0 z-50 bg-white/10 backdrop-blur-sm">
-        <div className="container mx-auto px-2 py-3 flex items-center justify-between">
-          <div className="flex items-center">
-            <button
-              onClick={() => navigate('/')}
-              className="p-2 rounded-lg hover:bg-white/20 transition-colors"
-              aria-label="Назад"
-            >
-              <ArrowLeftIcon className="h-5 w-5 text-white" />
-            </button>
-            <h1 className="ml-3 text-lg font-semibold text-white truncate max-w-[200px]">{raffle.title}</h1>
-          </div>
-          
-          {/* Connection status indicator */}
-          <div className="flex items-center space-x-1">
-            <div className={`w-2 h-2 rounded-full ${
-              connectionStatus === 'connected' ? 'bg-green-400' : 
-              connectionStatus === 'error' ? 'bg-red-400' : 'bg-yellow-400'
-            } animate-pulse`}></div>
-            <span className="text-xs opacity-75 hidden sm:inline">
-              {connectionStatus === 'connected' ? 'Подключено' :
-               connectionStatus === 'error' ? 'Ошибка' : 
-               connectionStatus === 'completed' ? 'Завершен' : 'Подключение...'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="container mx-auto px-2 py-4 max-w-7xl">
-        {/* Countdown display */}
-        {countdown && countdown > 0 && (
-          <div className="text-center mb-6 animate-pulse">
-            <p className="text-xl mb-2">🎰 Розыгрыш начнется через:</p>
-            <p className="text-5xl font-bold">{formatCountdown(countdown)}</p>
-          </div>
-        )}
-
-        <div className="grid lg:grid-cols-3 gap-4">
-          {/* Wheel/Slot Section - занимает больше места на больших экранах */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-2xl" style={{ 
-              width: '100%',
-              maxWidth: '100%',
-              overflow: 'visible', // Изменено с hidden
-            }}>
-              {/* Убираем внутренний padding для слот-машины */}
-              {wheelParticipants.length > 0 ? (
-                raffle?.display_type === 'slot' ? (
-                  <SlotMachineComponent
-                    participants={wheelParticipants}
-                    isSpinning={isSpinning}
-                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                    socket={socket}
-                    raffleId={id}
-                    wheelSpeed={raffle?.wheel_speed || 'fast'}
-                    targetWinnerIndex={currentRound?.target_winner_index}
-                    onComplete={(winner) => console.log('Winner selected:', winner)}
-                  />
-                ) : (
-                  <div className="p-4 md:p-6">
-                    <WheelComponent
-                      participants={wheelParticipants}
-                      isSpinning={isSpinning}
-                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
-                      socket={socket}
-                      raffleId={id}
-                      wheelSpeed={raffle?.wheel_speed || 'fast'}
-                      targetAngle={currentRound?.targetAngle}
-                      onComplete={(winner) => console.log('Winner selected:', winner)}
-                    />
-                  </div>
-                )
-              ) : (
-                <div className="text-center text-gray-600 py-20 px-4">
-                  <p className="text-xl mb-4">Ожидание участников...</p>
-                  <p>Текущее количество участников: {participants.length}</p>
-                  {participants.length < Object.keys(raffle.prizes).length && (
-                    <p className="text-sm text-red-600 mt-2">
-                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Winners Table - более компактная на мобильных */}
-          <div className="bg-white/10 backdrop-blur rounded-lg p-4">
-            <h2 className="text-xl font-semibold mb-3">🏆 Призовые места</h2>
-            <div className="space-y-2">
-              {Object.entries(raffle.prizes)
-                .sort(([a], [b]) => parseInt(a) - parseInt(b))
-                .map(([position, prize]) => {
-                const winner = winners.find(w => w.position === parseInt(position));
-                const isCurrentRound = currentRound?.position === parseInt(position);
-                
-                return (
-                  <div 
-                    key={position} 
-                    className={`p-3 rounded-lg transition-all duration-300 ${
-                      winner ? 'bg-green-500/30 scale-105' : 
-                      isCurrentRound ? 'bg-yellow-500/30 animate-pulse' : 
-                      'bg-white/10'
-                    }`}
-                  >
-                    <div className="font-semibold flex items-center justify-between text-sm">
-                      <span>{position} место</span>
-                      {position === '1' && '🥇'}
-                      {position === '2' && '🥈'}
-                      {position === '3' && '🥉'}
-                    </div>
-                    <div className="text-xs opacity-90 mt-1">{prize}</div>
-                    {winner && (
-                      <div className="text-base mt-2 font-bold">
-                        🎉 @{winner.winner?.username || winner.user?.username || 'Победитель'}
-                      </div>
-                    )}
-                    {isCurrentRound && !winner && (
-                      <div className="text-xs mt-2 animate-pulse">
-                        🎰 Разыгрывается...
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Participants Count */}
-        <div className="mt-6 bg-white/10 backdrop-blur rounded-lg p-4 text-center">
-          <h3 className="text-xl font-semibold mb-2">👥 Всего участников</h3>
-          <p className="text-3xl font-bold">{participants.length}</p>
-        </div>
-
-        {/* Completed message */}
-        {connectionStatus === 'completed' && (
-          <div className="mt-6 text-center">
-            <div className="bg-white/20 backdrop-blur rounded-lg p-6">
-              <h2 className="text-2xl font-bold mb-3">🎊 Розыгрыш завершен!</h2>
-              <p className="text-lg mb-4">Поздравляем всех победителей!</p>
-              <button
-                onClick={() => navigate('/')}
-                className="bg-white text-purple-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-              >
-                Вернуться на главную
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
