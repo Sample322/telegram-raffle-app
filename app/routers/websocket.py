@@ -107,10 +107,14 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 }
 
                 # индекс победителя в общем списке (для анимации)
+                # индекс победителя в общем списке (для анимации)
                 display_index = next(
                     (i for i, p in enumerate(state['participant_list']) if p['id'] == winner.telegram_id),
                     0
                 )
+
+                # Логируем для отладки
+                logger.info(f"Winner {winner.username} (id={winner.telegram_id}) at index {display_index} of {len(state['participant_list'])} participants")
 
                 # отправляем клиентам событие wheel_start с predetermined_winner
                 await manager.broadcast({
@@ -119,7 +123,8 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                     "prize": raffle.prizes[position],
                     "participants": state['participant_list'],
                     "predetermined_winner_index": display_index,
-                    "predetermined_winner": winner_data
+                    "predetermined_winner": winner_data,
+                    "total_participants": len(state['participant_list'])
                 }, raffle_id)
 
                 # ждём окончания анимации
