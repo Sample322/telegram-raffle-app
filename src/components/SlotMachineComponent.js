@@ -35,7 +35,7 @@ function getDuplicationFactor(speed, participantsLength) {
 }
 
 const SlotMachineComponent = ({
-  participants,
+  participants = [],  // Значение по умолчанию
   isSpinning,
   onComplete,
   currentPrize,
@@ -44,6 +44,7 @@ const SlotMachineComponent = ({
   wheelSpeed = 'fast',
   targetWinnerIndex,
 }) => {
+  const validParticipants = Array.isArray(participants) ? participants : [];
   const slotRef = useRef(null);
   const stripRef = useRef(null);
   const containerRef = useRef(null);
@@ -58,6 +59,7 @@ const SlotMachineComponent = ({
   const lastWidthRef = useRef(0);
   const isResizingRef = useRef(false);
   const isAnimatingRef = useRef(false);
+  
 
   // Расчет ширины элемента с обработкой resize
   useEffect(() => {

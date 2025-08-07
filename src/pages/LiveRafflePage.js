@@ -1,10 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import WheelComponent from '../components/WheelComponent';
 import { toast } from 'react-hot-toast';
 import SlotMachineComponent from '../components/SlotMachineComponent';
+// После импортов добавьте класс ErrorBoundary
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('LiveRafflePage error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-red-600 mb-4">Произошла ошибка</h2>
+            <p className="text-gray-600 mb-4">{this.state.error?.message || 'Неизвестная ошибка'}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Перезагрузить страницу
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 function LiveRafflePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -55,9 +91,11 @@ function LiveRafflePage() {
     }
   };
 
-  const connectWebSocket = () => {
+    const connectWebSocket = () => {
+    console.log('Starting WebSocket connection for raffle:', id);
+    
     const wsUrl = `${process.env.REACT_APP_WS_URL || 'ws://localhost:8000'}/api/ws/${id}`;
-    console.log('Connecting to WebSocket:', wsUrl);
+    console.log('WebSocket URL:', wsUrl);
     
     const ws = new WebSocket(wsUrl);
 
@@ -91,27 +129,37 @@ function LiveRafflePage() {
           break;
           
         case 'wheel_start':
-          // Получаем предопределенного победителя от сервера
-          const predeterminedWinner = data.predetermined_winner;
+          // Получаем данные от сервера
+          const orderedParticipants = data.participants || [];
           const predeterminedIndex = data.predetermined_winner_index;
+          const predeterminedWinner = data.predetermined_winner;
           
-          console.log('Server predetermined winner:', predeterminedWinner, 'at index:', predeterminedIndex);
+          console.log('Wheel start data:', {
+            position: data.position,
+            participantsCount: orderedParticipants.length,
+            predeterminedIndex,
+            predeterminedWinner
+          });
           
-          // Устанавливаем участников в точном порядке от сервера
-          const orderedParticipants = data.participants;
+          // Проверяем валидность данных
+          if (orderedParticipants.length === 0) {
+            console.error('No participants received from server');
+            toast.error('Ошибка: нет участников');
+            break;
+          }
           
           setCurrentRound({
             position: data.position,
             prize: data.prize,
             participants: orderedParticipants,
-            targetWinnerIndex: predeterminedIndex,  // Индекс победителя для анимации
-            predeterminedWinner: predeterminedWinner  // Данные победителя
+            targetWinnerIndex: predeterminedIndex !== undefined ? predeterminedIndex : 0,
+            predeterminedWinner: predeterminedWinner
           });
           
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
           break;
-         
+        
         case 'winner_confirmed':
           // Проверяем, не обработали ли мы уже этого победителя
           const winnerKey = `${data.position}_${data.winner.id}`;
@@ -146,10 +194,10 @@ function LiveRafflePage() {
             toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
           }
           break;
-                    // В switch statement для ws.onmessage добавить:
-          case 'round_complete':
-            console.log(`Round ${data.position} completed`);
-            // Обновляем состояние для следующего раунда
+          
+        case 'round_complete':
+          console.log(`Round ${data.position} completed`);
+          // Обновляем состояние для следующего раунда
           setCurrentRound(prev => {
             if (prev && prev.position === data.position) {
               return null; // Сбрасываем только если это тот же раунд
@@ -161,7 +209,8 @@ function LiveRafflePage() {
           if (data.winner_id) {
             setParticipants(prev => prev.filter(p => p.telegram_id !== data.winner_id));
           }
-            break;
+          break;
+          
         case 'raffle_complete':
           setWinners(data.winners);
           setConnectionStatus('completed');
@@ -169,8 +218,9 @@ function LiveRafflePage() {
           setIsSpinning(false);
           toast.success('🎊 Розыгрыш завершен!');
           // Отключаем WebSocket после завершения
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.close();}
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
           break;
           
         case 'countdown':
@@ -323,36 +373,49 @@ return (
               {wheelParticipants.length > 0 ? (
                 raffle?.display_type === 'slot' ? (
                   <SlotMachineComponent
-                    participants={wheelParticipants}
+                    participants={currentRound?.participants || wheelParticipants}
                     isSpinning={isSpinning}
-                    currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                    currentPrize={currentRound ? { 
+                      position: currentRound.position, 
+                      prize: currentRound.prize 
+                    } : null}
                     socket={socket}
                     raffleId={id}
                     wheelSpeed={raffle?.wheel_speed || 'fast'}
-                    targetWinnerIndex={currentRound?.target_winner_index}
-                    onComplete={(winner) => console.log('Winner selected:', winner)}
+                    targetWinnerIndex={currentRound?.targetWinnerIndex}
+                    onComplete={(winner) => {
+                      console.log('Animation complete, winner:', winner);
+                      setIsSpinning(false);
+                    }}
                   />
                 ) : (
                   <div className="p-4 md:p-6">
                     <WheelComponent
-                      participants={wheelParticipants}
+                      participants={currentRound?.participants || wheelParticipants}
                       isSpinning={isSpinning}
-                      currentPrize={currentRound ? { position: currentRound.position, prize: currentRound.prize } : null}
+                      currentPrize={currentRound ? { 
+                        position: currentRound.position, 
+                        prize: currentRound.prize 
+                      } : null}
                       socket={socket}
                       raffleId={id}
                       wheelSpeed={raffle?.wheel_speed || 'fast'}
                       targetAngle={currentRound?.targetAngle}
-                      onComplete={(winner) => console.log('Winner selected:', winner)}
+                      onComplete={(winner) => {
+                        console.log('Animation complete, winner:', winner);
+                        setIsSpinning(false);
+                      }}
                     />
                   </div>
                 )
               ) : (
+                // Сообщение когда нет участников
                 <div className="text-center text-gray-600 py-20 px-4">
                   <p className="text-xl mb-4">Ожидание участников...</p>
                   <p>Текущее количество участников: {participants.length}</p>
-                  {participants.length < Object.keys(raffle.prizes).length && (
+                  {participants.length < Object.keys(raffle.prizes || {}).length && (
                     <p className="text-sm text-red-600 mt-2">
-                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+                      Минимум участников для розыгрыша: {Object.keys(raffle.prizes || {}).length}
                     </p>
                   )}
                 </div>
@@ -428,5 +491,10 @@ return (
     </div>
   );
 }
-
-export default LiveRafflePage;
+export default function LiveRafflePageWithErrorBoundary(props) {
+  return (
+    <ErrorBoundary>
+      <LiveRafflePage {...props} />
+    </ErrorBoundary>
+  );
+}
