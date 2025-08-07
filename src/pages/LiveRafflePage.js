@@ -85,26 +85,40 @@ function LiveRafflePage() {
             toast.success('Розыгрыш начинается!');
             break;
           case 'wheel_start': {
-            // Сохраняем информацию от сервера включая предопределенного победителя
+            // Сохраняем информацию от сервера включая ID победителя
             let orderedParticipants = [];
             if (data.participants && data.participants.length > 0) {
               orderedParticipants = data.participants;
             }
             
+            // Фильтруем участников, убирая тех, кто уже выиграл
+            const currentWinnerIds = winners.map(w => 
+              w.winner?.id || w.user?.telegram_id || w.user?.id
+            );
+            
+            const availableParticipants = orderedParticipants.filter(p => 
+              !currentWinnerIds.includes(p.id)
+            );
+            
             setCurrentRound({
               position: data.position,
               prize: data.prize,
-              participants: orderedParticipants,
-              targetWinnerIndex: data.predetermined_winner_index, // ВАЖНО: используем индекс от сервера
-              predeterminedWinner: data.predetermined_winner // Сохраняем данные победителя
+              participants: availableParticipants,  // Используем отфильтрованный список
+              predeterminedWinnerId: data.predetermined_winner_id,  // ID победителя от сервера
+              predeterminedWinner: data.predetermined_winner
             });
             
             setIsSpinning(true);
             toast(`🎰 Разыгрывается ${data.position} место!`);
+            console.log('Round started:', {
+              position: data.position,
+              winnerId: data.predetermined_winner_id,
+              availableParticipants: availableParticipants.map(p => ({id: p.id, name: p.username}))
+            });
             break;
           }
           case 'winner_confirmed': {
-            // Avoid processing duplicate winner notifications
+            // Избегаем дубликатов
             const winnerKey = `${data.position}_${data.winner.id}`;
             const processedKey = `processed_winners_${id}`;
             if (!window[processedKey]) {
@@ -114,6 +128,8 @@ function LiveRafflePage() {
               break;
             }
             window[processedKey].add(winnerKey);
+            
+            // Обновляем список победителей
             setWinners((prev) => {
               const updated = [...prev];
               const idx = updated.findIndex((w) => w.position === data.position);
@@ -124,6 +140,10 @@ function LiveRafflePage() {
               }
               return updated;
             });
+            
+            // ВАЖНО: Удаляем победителя из списка участников для следующих раундов
+            setParticipants((prev) => prev.filter((p) => p.telegram_id !== data.winner.id));
+            
             setIsSpinning(false);
             if (!data.auto_selected) {
               toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
