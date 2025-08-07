@@ -284,7 +284,6 @@ const SlotMachineComponent = ({
   }
 }, [participants, itemWidth, slotRef]);
 
-  // Запуск вращения
   const startSpin = useCallback(() => {
   if (participants.length === 0 || !stripRef.current || isAnimatingRef.current) return;
   
@@ -300,51 +299,45 @@ const SlotMachineComponent = ({
   
   const settings = speedSettings[wheelSpeed] || speedSettings.fast;
   
-  // Получаем актуальную ширину элемента
   const computedStyle = window.getComputedStyle(document.documentElement);
   const currentItemWidth = parseFloat(computedStyle.getPropertyValue('--item-width')) || itemWidth;
-  // Используем динамический margin вместо константы
   const currentMargin = getItemMargin();
   const itemFullWidth = currentItemWidth + currentMargin;
   
   const currentX = gsap.getProperty(stripRef.current, 'x') || 0;
   const viewportCenter = slotRef.current ? slotRef.current.offsetWidth / 2 : 0;
   
+  // ИСПОЛЬЗУЕМ targetWinnerIndex от сервера, если он есть
   let targetIndex;
   if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
     targetIndex = targetWinnerIndex;
+    console.log('Using server-provided winner index:', targetIndex);
   } else {
+    // Fallback - не должно происходить в production
     targetIndex = Math.floor(Math.random() * participants.length);
+    console.warn('No server winner index, using random:', targetIndex);
   }
   
-  // Расчет финальной позиции
+  // Расчет финальной позиции для точной остановки на победителе
   const spinsDistance = settings.spins * participants.length * itemFullWidth;
-  
-  // Находим ближайшую позицию целевого элемента впереди
   const currentAbsolutePos = -currentX + viewportCenter;
   const currentElementIndex = Math.floor(currentAbsolutePos / itemFullWidth);
   
-  // Сколько элементов нужно прокрутить до целевого
   let elementsToTarget = targetIndex - (currentElementIndex % participants.length);
   if (elementsToTarget <= 0) {
     elementsToTarget += participants.length;
   }
   
-  // Финальная позиция
   const targetDistance = spinsDistance + (elementsToTarget * itemFullWidth);
   const finalPosition = currentX - targetDistance + viewportCenter;
   
-  console.log('Spin parameters:', {
+  console.log('Animation to predetermined winner:', {
     targetIndex,
-    currentX,
-    finalPosition,
-    distance: targetDistance,
-    viewportCenter,
-    currentItemWidth,
-    duration: settings.duration
+    winnerName: participants[targetIndex]?.username || participants[targetIndex]?.first_name,
+    finalPosition
   });
   
-  // Убиваем предыдущую анимацию если есть
+  // Убиваем предыдущую анимацию
   if (animationRef.current) {
     animationRef.current.kill();
   }
@@ -356,75 +349,39 @@ const SlotMachineComponent = ({
     ease: settings.ease,
     onUpdate: updateHighlight,
     onComplete: () => {
-      console.log('Animation completed');
+      console.log('Animation completed - winner predetermined by server');
       isAnimatingRef.current = false;
       animationRef.current = null;
       handleSpinComplete();
     },
     onStart: () => {
-      console.log('Animation started');
       if (slotRef.current) {
         slotRef.current.classList.add('spinning');
       }
     }
   });
   
-}, [participants, wheelSpeed, targetWinnerIndex, itemWidth, updateHighlight, slotRef]);
+}, [participants, wheelSpeed, targetWinnerIndex, itemWidth, updateHighlight, handleSpinComplete]);
 
-  // Обработка завершения вращения
-  const handleSpinComplete = useCallback(() => {
-    console.log('Handling spin complete...');
-    
-    // Убираем класс spinning
-    if (slotRef.current) {
-      slotRef.current.classList.remove('spinning');
-    }
-    
-    if (!hasNotifiedRef.current && currentPrize && socket && socket.readyState === WebSocket.OPEN) {
-      hasNotifiedRef.current = true;
-      
-      // Финальное обновление позиции
-      updateHighlight();
-      
-      const winner = currentHighlight || participants[0];
-      
-      if (winner) {
-        const now = Date.now();
-        const messageId = `${raffleId}_${currentPrize.position}_${now}`;
-        
-        if (!processedMessagesRef.current.has(messageId) && !isSendingRef.current) {
-          isSendingRef.current = true;
-          processedMessagesRef.current.add(messageId);
-          
-          const message = {
-            type: 'winner_selected',
-            winner: winner,
-            position: currentPrize.position,
-            prize: currentPrize.prize,
-            timestamp: now,
-            messageId: messageId,
-          };
-          
-          console.log('Sending winner to server:', message);
-          socket.send(JSON.stringify(message));
-          
-          // Подсвечиваем победителя
-          const winnerElements = stripRef.current.querySelectorAll(`[data-participant-id="${winner.id}"]`);
-          winnerElements.forEach(el => el.classList.add('winner'));
-          
-          // Вызываем callback после отправки
-          if (onComplete) {
-            onComplete(winner);
-          }
-          
-          // Сбрасываем флаг отправки через небольшую задержку
-          setTimeout(() => {
-            isSendingRef.current = false;
-          }, 1000);
-        }
-      }
-    }
-  }, [participants, currentPrize, socket, raffleId, onComplete, currentHighlight, updateHighlight]);
+const handleSpinComplete = useCallback(() => {
+  console.log('Animation completed');
+  
+  // Убираем класс spinning
+  if (slotRef.current) {
+    slotRef.current.classList.remove('spinning');
+  }
+  
+  // Финальное обновление позиции
+  updateHighlight();
+  
+  // НЕ отправляем результат на сервер - он уже знает победителя!
+  // Просто ждем подтверждения от сервера через WebSocket
+  
+  if (onComplete) {
+    const winner = currentHighlight || participants[0];
+    onComplete(winner);
+  }
+}, [participants, currentHighlight, updateHighlight, onComplete]);
 
   // Управление анимацией
   useEffect(() => {

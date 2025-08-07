@@ -91,29 +91,23 @@ function LiveRafflePage() {
           break;
           
         case 'wheel_start':
-          let orderedParticipants = [];
-          if (data.participant_order && data.participant_order.length > 0) {
-            orderedParticipants = data.participant_order.map(tid => {
-              const participant = data.participants.find(p => p.id === tid);
-              if (!participant) {
-                console.error(`Participant with id ${tid} not found in participants list`);
-              }
-              return participant;
-            }).filter(Boolean);
-          } else {
-            console.error('No participant_order received from backend!');
-            orderedParticipants = data.participants;
-          }
+          // Получаем предопределенного победителя от сервера
+          const predeterminedWinner = data.predetermined_winner;
+          const predeterminedIndex = data.predetermined_winner_index;
           
-          console.log('Wheel participants order:', orderedParticipants.map(p => ({ id: p.id, username: p.username })));
-          console.log('Target angle from server:', data.target_angle);
-        
+          console.log('Server predetermined winner:', predeterminedWinner, 'at index:', predeterminedIndex);
+          
+          // Устанавливаем участников в точном порядке от сервера
+          const orderedParticipants = data.participants;
+          
           setCurrentRound({
             position: data.position,
             prize: data.prize,
             participants: orderedParticipants,
-            targetAngle: data.target_angle  // Сохраняем целевой угол
+            targetWinnerIndex: predeterminedIndex,  // Индекс победителя для анимации
+            predeterminedWinner: predeterminedWinner  // Данные победителя
           });
+          
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
           break;
