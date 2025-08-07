@@ -269,12 +269,12 @@ const SlotMachineComponent = ({
     const currentX = gsap.getProperty(stripRef.current, 'x') || 0;
     const viewportCenter = slotRef.current ? slotRef.current.offsetWidth / 2 : 0;
     let targetIndex;
-    if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
-      targetIndex = targetWinnerIndex;
-      console.log('Using server-provided winner index:', targetIndex);
+    if (targetWinnerIndex !== undefined && targetWinnerIndex !== null && targetWinnerIndex >= 0) {
+      targetIndex = targetWinnerIndex % validParticipants.length; // Защита от выхода за границы
+      console.log('Using server-provided winner index:', targetIndex, 'for participant:', validParticipants[targetIndex]);
     } else {
-      targetIndex = Math.floor(Math.random() * validParticipants.length);
-      console.warn('No server winner index, using random:', targetIndex);
+      console.error('CRITICAL: No server winner index provided! This will cause desync!');
+      targetIndex = 0; // Используем первого участника как fallback
     }
     const spinsDistance = settings.spins * validParticipants.length * itemFullWidth;
     const currentAbsolutePos = -currentX + viewportCenter;
