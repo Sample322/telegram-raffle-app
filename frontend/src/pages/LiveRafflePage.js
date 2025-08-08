@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
-import WheelComponent from '../components/WheelComponent';
 import SlotMachineComponent from '../components/SlotMachineComponent';
 import { toast } from 'react-hot-toast';
 
@@ -84,39 +83,51 @@ function LiveRafflePage() {
           case 'raffle_starting':
             toast.success('Розыгрыш начинается!');
             break;
-          case 'wheel_start': {
-            // Сохраняем информацию от сервера включая ID победителя
+          case 'slot_start': {
+            // формируем список участников от сервера
             let orderedParticipants = [];
             if (data.participants && data.participants.length > 0) {
               orderedParticipants = data.participants;
             }
-            
-            // Фильтруем участников, убирая тех, кто уже выиграл
-            const currentWinnerIds = winners.map(w => 
+
+            // исключаем тех, кто уже выиграл
+            const currentWinnerIds = winners.map((w) =>
               w.winner?.id || w.user?.telegram_id || w.user?.id
             );
-            
-            const availableParticipants = orderedParticipants.filter(p => 
-              !currentWinnerIds.includes(p.id)
+            const availableParticipants = orderedParticipants.filter(
+              (p) => !currentWinnerIds.includes(p.id)
             );
-            
+
+            // находим индекс победителя (для подсветки в таблице, не обязателен)
+            const predId = data.predetermined_winner_id;
+            let targetWinnerIndex = null;
+            const idx = availableParticipants.findIndex(
+              (p) => String(p.id) === String(predId)
+            );
+            targetWinnerIndex = idx >= 0 ? idx : null;
+
             setCurrentRound({
               position: data.position,
               prize: data.prize,
-              participants: availableParticipants,  // Используем отфильтрованный список
-              predeterminedWinnerId: data.predetermined_winner_id,  // ID победителя от сервера
-              predeterminedWinner: data.predetermined_winner
+              participants: availableParticipants,
+              predeterminedWinnerId: predId,
+              predeterminedWinner: data.predetermined_winner,
+              targetWinnerIndex, // необязательное поле для подсветки
             });
-            
+
             setIsSpinning(true);
             toast(`🎰 Разыгрывается ${data.position} место!`);
             console.log('Round started:', {
               position: data.position,
-              winnerId: data.predetermined_winner_id,
-              availableParticipants: availableParticipants.map(p => ({id: p.id, name: p.username}))
+              winnerId: predId,
+              availableParticipants: availableParticipants.map((p) => ({
+                id: p.id,
+                name: p.username,
+              })),
             });
             break;
           }
+
           case 'winner_confirmed': {
             // Избегаем дубликатов
             const winnerKey = `${data.position}_${data.winner.id}`;
@@ -309,41 +320,27 @@ function LiveRafflePage() {
 
       {/* Wheel/Slot Section */}
       <div className="flex justify-center">
-        {wheelParticipants.length > 0 ? (
-          raffle?.display_type === 'slot' ? (
+          {wheelParticipants.length > 0 ? (
             <SlotMachineComponent
               participants={wheelParticipants}
               isSpinning={isSpinning}
               onComplete={(winner) => {
                 console.log('Winner selected:', winner);
               }}
-              currentPrize={currentRound ? {
-                position: currentRound.position,
-                prize: currentRound.prize
-              } : null}
+              currentPrize={
+                currentRound
+                  ? {
+                      position: currentRound.position,
+                      prize: currentRound.prize,
+                    }
+                  : null
+              }
               socket={socket}
               raffleId={id}
               wheelSpeed={raffle?.wheel_speed || 'fast'}
-              targetWinnerIndex={currentRound?.targetWinnerIndex}
+              targetWinnerId={currentRound?.predeterminedWinnerId}
             />
           ) : (
-            <WheelComponent
-              participants={wheelParticipants}
-              isSpinning={isSpinning}
-              onComplete={(winner) => {
-                console.log('Winner selected:', winner);
-              }}
-              currentPrize={currentRound ? {
-                position: currentRound.position,
-                prize: currentRound.prize
-              } : null}
-              socket={socket}
-              raffleId={id}
-              wheelSpeed={raffle?.wheel_speed || 'fast'}
-              targetAngle={currentRound?.targetAngle}
-            />
-          )
-        ) : (
           <div className="text-center space-y-2 bg-white/10 backdrop-blur-sm rounded-lg p-6">
             <p className="text-white text-lg">⏳ Ожидание участников...</p>
             <p className="text-white/80">
