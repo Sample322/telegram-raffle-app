@@ -85,27 +85,40 @@ function LiveRafflePage() {
             toast.success('Розыгрыш начинается!');
             break;
           case 'wheel_start': {
-            // Determine the participant order sent by the server or fall back to the current participant list
+            // Сохраняем информацию от сервера включая ID победителя
             let orderedParticipants = [];
-            if (data.participant_order && data.participant_order.length > 0) {
-              orderedParticipants = data.participant_order
-                .map((tid) => data.participants.find((p) => p.id === tid))
-                .filter(Boolean);
-            } else {
+            if (data.participants && data.participants.length > 0) {
               orderedParticipants = data.participants;
             }
+            
+            // Фильтруем участников, убирая тех, кто уже выиграл
+            const currentWinnerIds = winners.map(w => 
+              w.winner?.id || w.user?.telegram_id || w.user?.id
+            );
+            
+            const availableParticipants = orderedParticipants.filter(p => 
+              !currentWinnerIds.includes(p.id)
+            );
+            
             setCurrentRound({
               position: data.position,
               prize: data.prize,
-              participants: orderedParticipants,
-              targetAngle: data.target_angle,
+              participants: availableParticipants,  // Используем отфильтрованный список
+              predeterminedWinnerId: data.predetermined_winner_id,  // ID победителя от сервера
+              predeterminedWinner: data.predetermined_winner
             });
+            
             setIsSpinning(true);
             toast(`🎰 Разыгрывается ${data.position} место!`);
+            console.log('Round started:', {
+              position: data.position,
+              winnerId: data.predetermined_winner_id,
+              availableParticipants: availableParticipants.map(p => ({id: p.id, name: p.username}))
+            });
             break;
           }
           case 'winner_confirmed': {
-            // Avoid processing duplicate winner notifications
+            // Избегаем дубликатов
             const winnerKey = `${data.position}_${data.winner.id}`;
             const processedKey = `processed_winners_${id}`;
             if (!window[processedKey]) {
@@ -115,6 +128,8 @@ function LiveRafflePage() {
               break;
             }
             window[processedKey].add(winnerKey);
+            
+            // Обновляем список победителей
             setWinners((prev) => {
               const updated = [...prev];
               const idx = updated.findIndex((w) => w.position === data.position);
@@ -125,6 +140,10 @@ function LiveRafflePage() {
               }
               return updated;
             });
+            
+            // ВАЖНО: Удаляем победителя из списка участников для следующих раундов
+            setParticipants((prev) => prev.filter((p) => p.telegram_id !== data.winner.id));
+            
             setIsSpinning(false);
             if (!data.auto_selected) {
               toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
@@ -254,33 +273,38 @@ function LiveRafflePage() {
       .filter((p) => !eliminatedIds.includes(p.id));
 
   return (
+  <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
     <div className="p-4 space-y-6">
       {/* Navigation Header */}
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-lg p-3">
         <button
           onClick={() => navigate('/')}
-          className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
+          className="p-2 rounded-lg hover:bg-white/20 transition-colors text-white"
           aria-label="Назад"
         >
           <ArrowLeftIcon className="w-5 h-5" />
         </button>
-        <h1 className="text-2xl font-semibold truncate">{raffle.title}</h1>
-        <div className="ml-auto text-sm font-medium">
-          {connectionStatus === 'connected'
-            ? 'Подключено'
-            : connectionStatus === 'error'
-            ? 'Ошибка'
-            : connectionStatus === 'completed'
-            ? 'Завершен'
-            : 'Подключение...'}
+        <h1 className="text-2xl font-semibold text-white truncate">{raffle?.title}</h1>
+        <div className="ml-auto text-sm font-medium px-3 py-1 rounded-full"
+             style={{
+               backgroundColor: connectionStatus === 'connected' ? '#10b981' : 
+                              connectionStatus === 'error' ? '#ef4444' :
+                              connectionStatus === 'completed' ? '#6366f1' : '#f59e0b',
+               color: 'white'
+             }}>
+          {connectionStatus === 'connected' ? '🟢 Подключено' :
+           connectionStatus === 'error' ? '🔴 Ошибка' :
+           connectionStatus === 'completed' ? '✅ Завершен' : '🟡 Подключение...'}
         </div>
       </div>
 
       {/* Countdown display */}
       {countdown && countdown > 0 && (
-        <p className="text-center text-lg">
-          🎰 Розыгрыш начнется через: <strong>{formatCountdown(countdown)}</strong>
-        </p>
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
+          <p className="text-center text-lg text-white">
+            🎰 Розыгрыш начнется через: <strong className="text-2xl text-yellow-300">{formatCountdown(countdown)}</strong>
+          </p>
+        </div>
       )}
 
       {/* Wheel/Slot Section */}
@@ -291,14 +315,16 @@ function LiveRafflePage() {
               participants={wheelParticipants}
               isSpinning={isSpinning}
               onComplete={(winner) => {
-                // The slot component internally emits events via WebSocket
                 console.log('Winner selected:', winner);
               }}
-              currentPrize={currentRound?.prize}
+              currentPrize={currentRound ? {
+                position: currentRound.position,
+                prize: currentRound.prize
+              } : null}
               socket={socket}
               raffleId={id}
               wheelSpeed={raffle?.wheel_speed || 'fast'}
-              targetWinnerIndex={null}
+              targetWinnerIndex={currentRound?.targetWinnerIndex}
             />
           ) : (
             <WheelComponent
@@ -307,7 +333,10 @@ function LiveRafflePage() {
               onComplete={(winner) => {
                 console.log('Winner selected:', winner);
               }}
-              currentPrize={currentRound?.prize}
+              currentPrize={currentRound ? {
+                position: currentRound.position,
+                prize: currentRound.prize
+              } : null}
               socket={socket}
               raffleId={id}
               wheelSpeed={raffle?.wheel_speed || 'fast'}
@@ -315,13 +344,13 @@ function LiveRafflePage() {
             />
           )
         ) : (
-          <div className="text-center space-y-2">
-            <p>Ожидание участников...</p>
-            <p>
-              Текущее количество участников: {participants.length}
-              {participants.length < Object.keys(raffle.prizes).length && (
-                <span>
-                  <br />Минимум участников для розыгрыша: {Object.keys(raffle.prizes).length}
+          <div className="text-center space-y-2 bg-white/10 backdrop-blur-sm rounded-lg p-6">
+            <p className="text-white text-lg">⏳ Ожидание участников...</p>
+            <p className="text-white/80">
+              Текущее количество участников: <strong className="text-xl">{participants.length}</strong>
+              {participants.length < Object.keys(raffle?.prizes || {}).length && (
+                <span className="block mt-2 text-yellow-300">
+                  Минимум для розыгрыша: {Object.keys(raffle?.prizes || {}).length}
                 </span>
               )}
             </p>
@@ -330,65 +359,59 @@ function LiveRafflePage() {
       </div>
 
       {/* Winners Table */}
-      <div className="overflow-x-auto">
-        <h2 className="text-xl font-semibold mb-2">🏆 Призовые места</h2>
-        <table className="min-w-full text-left text-sm border border-gray-200">
-          <tbody>
-            {Object.entries(raffle.prizes)
-              .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([position, prize]) => {
-                const winner = winners.find((w) => w.position === Number(position));
-                const isCurrentRound = currentRound?.position === Number(position);
-                const medal =
-                  position === '1'
-                    ? '🥇'
-                    : position === '2'
-                    ? '🥈'
-                    : position === '3'
-                    ? '🥉'
-                    : '';
-                return (
-                  <tr
-                    key={position}
-                    className={
-                      isCurrentRound
-                        ? 'bg-yellow-100'
-                        : winner
-                        ? 'bg-green-50'
-                        : ''
-                    }
-                  >
-                    <td className="px-2 py-1 font-medium">
-                      {position} место {medal}
-                    </td>
-                    <td className="px-2 py-1">{prize}</td>
-                    <td className="px-2 py-1">
-                      {winner ? (
-                        <span>
-                          🎉 @
-                          {winner.winner?.username || winner.user?.username || 'Победитель'}
-                        </span>
-                      ) : isCurrentRound ? (
-                        <span>🎰 Разыгрывается...</span>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
+      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
+        <h2 className="text-xl font-semibold mb-3 text-white">🏆 Призовые места</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <tbody>
+              {raffle && Object.entries(raffle.prizes)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([position, prize]) => {
+                  const winner = winners.find((w) => w.position === Number(position));
+                  const isCurrentRound = currentRound?.position === Number(position);
+                  const medal = position === '1' ? '🥇' : position === '2' ? '🥈' : position === '3' ? '🥉' : '🏅';
+                  
+                  return (
+                    <tr key={position} 
+                        className={`border-b border-white/10 ${
+                          isCurrentRound ? 'bg-yellow-500/30' : 
+                          winner ? 'bg-green-500/20' : ''
+                        }`}>
+                      <td className="px-3 py-2 font-medium text-white">
+                        {medal} {position} место
+                      </td>
+                      <td className="px-3 py-2 text-white/90">{prize}</td>
+                      <td className="px-3 py-2 text-white">
+                        {winner ? (
+                          <span className="text-green-300 font-semibold">
+                            ✅ @{winner.winner?.username || winner.user?.username || 'Победитель'}
+                          </span>
+                        ) : isCurrentRound ? (
+                          <span className="text-yellow-300 animate-pulse">🎰 Разыгрывается...</span>
+                        ) : (
+                          <span className="text-white/50">Ожидает розыгрыша</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Participants Count */}
-      <div className="text-sm">
-        👥 Всего участников: <strong>{participants.length}</strong>
+      <div className="text-center bg-white/10 backdrop-blur-sm rounded-lg p-3">
+        <p className="text-white">
+          👥 Всего участников: <strong className="text-xl text-yellow-300">{participants.length}</strong>
+        </p>
       </div>
 
       {/* Completed message */}
       {connectionStatus === 'completed' && (
-        <div className="space-y-2 text-center">
-          <p className="text-lg">🎊 Розыгрыш завершен!</p>
-          <p>Поздравляем всех победителей!</p>
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 text-center space-y-3">
+          <p className="text-2xl text-white font-bold">🎊 Розыгрыш завершен!</p>
+          <p className="text-white/90">Поздравляем всех победителей!</p>
           <button
             onClick={() => navigate('/')}
             className="bg-white text-purple-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
@@ -398,7 +421,8 @@ function LiveRafflePage() {
         </div>
       )}
     </div>
-  );
+  </div>
+);
 }
 
 export default LiveRafflePage;

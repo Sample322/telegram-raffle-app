@@ -43,7 +43,7 @@ const SlotMachineComponent = ({
   socket,
   raffleId,
   wheelSpeed = 'fast',
-  targetWinnerIndex,
+  targetWinnerId,  // ИЗМЕНЕНО: принимаем ID вместо индекса
 }) => {
   // безопасный список участников
   const validParticipants = Array.isArray(participants) ? participants : [];
@@ -248,34 +248,77 @@ const SlotMachineComponent = ({
   }, [validParticipants, currentHighlight, updateHighlight, onComplete]);
 
   /**
-   * запускает вращение. если сервер прислал targetWinnerIndex, останавливает ленту на нём.
-   * иначе использует случайный индекс (fallback).
+   * запускает вращение. если сервер прислал targetWinnerId, останавливает ленту на нём.
+   * иначе использует первого участника (fallback).
    */
   const startSpin = useCallback(() => {
     if (validParticipants.length === 0 || !stripRef.current || isAnimatingRef.current) return;
+    
     console.log('Starting spin animation...');
+    console.log('Current participants in slot:', validParticipants.map(p => ({
+      id: p.id,
+      name: p.username || p.first_name
+    })));
+    console.log('Target winner ID from server:', targetWinnerId);
+    
     hasNotifiedRef.current = false;
     isAnimatingRef.current = true;
+    
     const speedSettings = {
       fast: { duration: 4, ease: 'power4.out', spins: 8 },
       medium: { duration: 6, ease: 'power3.out', spins: 5 },
       slow: { duration: 8, ease: 'power2.out', spins: 3 },
     };
     const settings = speedSettings[wheelSpeed] || speedSettings.fast;
+    
     const computedStyle = window.getComputedStyle(document.documentElement);
     const currentItemWidth = parseFloat(computedStyle.getPropertyValue('--item-width')) || itemWidth;
     const currentMargin = getItemMargin();
     const itemFullWidth = currentItemWidth + currentMargin;
     const currentX = gsap.getProperty(stripRef.current, 'x') || 0;
     const viewportCenter = slotRef.current ? slotRef.current.offsetWidth / 2 : 0;
+    
+    // ИЗМЕНЕНО: Находим индекс победителя по его ID
     let targetIndex;
-    if (targetWinnerIndex !== undefined && targetWinnerIndex >= 0) {
-      targetIndex = targetWinnerIndex;
-      console.log('Using server-provided winner index:', targetIndex);
+    if (targetWinnerId !== undefined && targetWinnerId !== null) {
+      // Ищем участника с нужным ID в текущем списке
+      targetIndex = validParticipants.findIndex(p => {
+        // Сравниваем как числа и как строки для надежности
+        return p.id === targetWinnerId || 
+               p.id === String(targetWinnerId) || 
+               String(p.id) === String(targetWinnerId);
+      });
+      
+      if (targetIndex === -1) {
+        console.error('CRITICAL: Winner not found in participants!', {
+          targetWinnerId,
+          participantIds: validParticipants.map(p => p.id),
+          participants: validParticipants.map(p => ({id: p.id, name: p.username || p.first_name}))
+        });
+        targetIndex = 0;
+      } else {
+        console.log('✅ Found winner by ID:', {
+          winnerId: targetWinnerId,
+          winnerIndex: targetIndex,
+          winner: validParticipants[targetIndex]
+        });
+      }
     } else {
-      targetIndex = Math.floor(Math.random() * validParticipants.length);
-      console.warn('No server winner index, using random:', targetIndex);
+      console.error('CRITICAL: No winner ID provided by server!');
+      targetIndex = 0;
     }
+    
+    console.log('=== SLOT MACHINE SYNC DEBUG ===');
+    console.log('Target Winner ID:', targetWinnerId);
+    console.log('Current participants:', validParticipants.map((p, i) => ({
+      index: i,
+      id: p.id,
+      name: p.username || p.first_name
+    })));
+    console.log('Will stop on index:', targetIndex);
+    console.log('Will stop on participant:', validParticipants[targetIndex]);
+    console.log('================================');
+    
     const spinsDistance = settings.spins * validParticipants.length * itemFullWidth;
     const currentAbsolutePos = -currentX + viewportCenter;
     const currentElementIndex = Math.floor(currentAbsolutePos / itemFullWidth);
@@ -285,9 +328,11 @@ const SlotMachineComponent = ({
     }
     const targetDistance = spinsDistance + elementsToTarget * itemFullWidth;
     const finalPosition = currentX - targetDistance + viewportCenter;
+    
     if (animationRef.current) {
       animationRef.current.kill();
     }
+    
     animationRef.current = gsap.to(stripRef.current, {
       x: finalPosition,
       duration: settings.duration,
@@ -305,7 +350,7 @@ const SlotMachineComponent = ({
         }
       },
     });
-  }, [validParticipants, wheelSpeed, targetWinnerIndex, itemWidth, updateHighlight, handleSpinComplete]);
+  }, [validParticipants, wheelSpeed, targetWinnerId, itemWidth, updateHighlight, handleSpinComplete]);
 
   // запускаем спин при isSpinning=true
   useEffect(() => {
