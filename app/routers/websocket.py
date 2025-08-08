@@ -97,7 +97,7 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                     logger.error(f"No participants left for position {position}")
                     break
 
-                            # сервер выбирает случайного победителя
+                # сервер выбирает случайного победителя
                 winner_index = random.randint(0, len(remaining_participants) - 1)
                 winner = remaining_participants[winner_index]
                 winner_data = {
@@ -111,18 +111,24 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 logger.info(f"Position {position}: Selected winner {winner.username} (id={winner.telegram_id})")
                 logger.info(f"Remaining participants: {[p.telegram_id for p in remaining_participants]}")
 
-                # отправляем клиентам событие wheel_start с ID победителя (не индекс!)
-                # вместо "type": "wheel_start"
+                # ВАЖНО: Формируем список ТОЛЬКО из оставшихся участников
+                remaining_participant_list = [{
+                    "id": p.telegram_id,
+                    "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
+                    "first_name": p.first_name,
+                    "last_name": p.last_name
+                } for p in remaining_participants]
+
+                # отправляем клиентам событие slot_start с АКТУАЛЬНЫМ списком
                 await manager.broadcast({
                     "type": "slot_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
-                    "participants": state['participant_list'],
+                    "participants": remaining_participant_list,  # ← ИСПРАВЛЕНО!
                     "predetermined_winner_id": winner.telegram_id,
                     "predetermined_winner": winner_data,
                     "remaining_participants_ids": [p.telegram_id for p in remaining_participants]
                 }, raffle_id)
-
 
                 # ждём окончания анимации
                 wheel_duration = {
