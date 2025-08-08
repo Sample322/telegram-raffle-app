@@ -81,16 +81,9 @@ function LiveRafflePage() {
           break;
 
         case 'slot_start': {
-          // ВАЖНО: Берем список участников ТОЛЬКО из события от сервера
           const serverParticipants = Array.isArray(data.participants) ? data.participants : [];
-
-          // Исключаем тех, кто уже выиграл
-          const alreadyWonIds = winners.map(
-            (w) => w.winner?.id || w.user?.telegram_id || w.user?.id
-          );
-          const availableParticipants = serverParticipants.filter(
-            (p) => !alreadyWonIds.includes(p.id)
-          );
+          // Сервер уже прислал только оставшихся участников!
+          const availableParticipants = serverParticipants;
 
           // ID победителя от сервера
           const winnerId = data.predetermined_winner_id;
