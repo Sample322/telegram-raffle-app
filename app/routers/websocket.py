@@ -34,10 +34,11 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             return
 
         # Загружаем участников в фиксированном порядке (по Telegram ID)
+        # ЗАМЕНИТЕ НА:
         participants_result = await db.execute(
             select(User).join(Participant)
             .where(Participant.raffle_id == raffle_id)
-            .order_by(User.telegram_id.asc())
+            .order_by(User.telegram_id.asc())  # ВАЖНО: фиксированный порядок
         )
         participants = participants_result.scalars().all()
 
