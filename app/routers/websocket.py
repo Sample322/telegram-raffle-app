@@ -111,15 +111,17 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 logger.info(f"Remaining participants: {[p.telegram_id for p in remaining_participants]}")
 
                 # отправляем клиентам событие wheel_start с ID победителя (не индекс!)
+                # вместо "type": "wheel_start"
                 await manager.broadcast({
-                    "type": "wheel_start",
+                    "type": "slot_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
                     "participants": state['participant_list'],
-                    "predetermined_winner_id": winner.telegram_id,  # Отправляем ID, не индекс!
+                    "predetermined_winner_id": winner.telegram_id,
                     "predetermined_winner": winner_data,
-                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants]  # Для отладки
+                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants]
                 }, raffle_id)
+
 
                 # ждём окончания анимации
                 wheel_duration = {

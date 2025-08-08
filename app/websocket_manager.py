@@ -52,7 +52,7 @@ class ConnectionManager:
             import hashlib
             
             message_key = None
-            if message.get("type") in ["winner_confirmed", "wheel_start"]:
+            if message.get("type") in ["winner_confirmed", "slot_start"]:
                 # Для критичных сообщений создаем ключ
                 content = f"{message.get('type')}_{message.get('position')}_{raffle_id}"
                 message_key = hashlib.md5(content.encode()).hexdigest()
