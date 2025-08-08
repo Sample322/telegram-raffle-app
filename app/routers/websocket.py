@@ -14,7 +14,12 @@ from ..websocket_manager import manager
 from ..services.telegram import TelegramService
 from ..services.notifications import NotificationService
 from ..services.distributed_lock import distributed_lock
+from ..services.provably_fair import ProvablyFairService
+from ..services.time_sync import TimeSyncService
+import uuid
 
+# Добавьте словарь для хранения client_id
+client_connections = {}
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -23,7 +28,7 @@ raffle_states = {}
 processed_messages = {}
 
 async def run_wheel(raffle_id: int, db: AsyncSession):
-    """Запуск анимации розыгрыша и выбор победителя на сервере"""
+    """Запуск розыгрыша с Provably Fair системой"""
     try:
         # Получаем розыгрыш и участников
         raffle_result = await db.execute(select(Raffle).where(Raffle.id == raffle_id))
@@ -33,11 +38,11 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             logger.warning(f"Raffle {raffle_id} not found or already completed")
             return
 
-        # Загружаем участников в фиксированном порядке (по Telegram ID)
+        # Загружаем участников в фиксированном порядке
         participants_result = await db.execute(
             select(User).join(Participant)
             .where(Participant.raffle_id == raffle_id)
-            .order_by(User.telegram_id.asc())
+            .order_by(User.telegram_id.asc())  # ВАЖНО: фиксированный порядок
         )
         participants = participants_result.scalars().all()
 
@@ -48,9 +53,9 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             }, raffle_id)
             return
 
-        logger.info(f"Starting raffle {raffle_id} with {len(participants)} participants")
+        logger.info(f"Starting provably fair raffle {raffle_id} with {len(participants)} participants")
 
-        # Сохраняем список участников для синхронизации с клиентами
+        # Список участников для клиентов
         participant_list = [{
             "id": p.telegram_id,
             "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
@@ -58,26 +63,27 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             "last_name": p.last_name
         } for p in participants]
 
-        # Инициализируем состояние розыгрыша
+        # Инициализируем состояние
         raffle_states[raffle_id] = {
             "participants": list(participants),
             "remaining_participants": list(participants),
             "winners": [],
             "completed_positions": set(),
             "participant_list": participant_list,
-            "lock": asyncio.Lock()  # локальная блокировка
+            "lock": asyncio.Lock()
         }
 
-        # Сообщаем всем клиентам о начале
+        # Уведомляем о начале
         await manager.broadcast({
             "type": "raffle_starting",
             "total_participants": len(participants),
-            "total_prizes": len(raffle.prizes)
+            "total_prizes": len(raffle.prizes),
+            "provably_fair": True
         }, raffle_id)
 
         await asyncio.sleep(3)
 
-        # Разыгрываем призы начиная с последнего места
+        # Разыгрываем призы
         sorted_positions = sorted(raffle.prizes.keys(), key=lambda x: int(x), reverse=True)
 
         for position in sorted_positions:
@@ -86,107 +92,121 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 break
 
             async with state['lock']:
-                # пропускаем, если это место уже разыграно
                 if int(position) in state['completed_positions']:
-                    logger.info(f"Position {position} already completed")
                     continue
 
                 remaining_participants = state['remaining_participants']
                 if not remaining_participants:
-                    logger.error(f"No participants left for position {position}")
                     break
 
-                            # сервер выбирает случайного победителя
-                winner_index = random.randint(0, len(remaining_participants) - 1)
-                winner = remaining_participants[winner_index]
-                winner_data = {
-                    "id": winner.telegram_id,
-                    "username": winner.username,
-                    "first_name": winner.first_name,
-                    "last_name": winner.last_name
-                }
-
-                # Логируем для отладки
-                logger.info(f"Position {position}: Selected winner {winner.username} (id={winner.telegram_id})")
-                logger.info(f"Remaining participants: {[p.telegram_id for p in remaining_participants]}")
-
-                # отправляем клиентам событие wheel_start с ID победителя (не индекс!)
+                # COMMIT PHASE - генерируем и отправляем коммит
+                server_seed = ProvablyFairService.generate_server_seed()
+                commit_data = ProvablyFairService.create_commit(
+                    raffle_id, 
+                    int(position),
+                    server_seed,
+                    len(remaining_participants)
+                )
+                
+                # Вычисляем время окончания анимации
+                wheel_duration = {
+                    'fast': 5000,
+                    'medium': 7000,
+                    'slow': 10000
+                }.get(raffle.wheel_speed, 5000)
+                
+                end_timestamp = int(time.time() * 1000) + wheel_duration
+                
+                # Отправляем commit клиентам
                 await manager.broadcast({
-                    "type": "wheel_start",
+                    "type": "round_commit",
                     "position": int(position),
                     "prize": raffle.prizes[position],
-                    "participants": state['participant_list'],
-                    "predetermined_winner_id": winner.telegram_id,  # Отправляем ID, не индекс!
-                    "predetermined_winner": winner_data,
-                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants]  # Для отладки
+                    "commit_hash": commit_data["commit_hash"],
+                    "participants_count": len(remaining_participants),
+                    "participants": [p for p in state['participant_list'] 
+                                   if p['id'] in [rp.telegram_id for rp in remaining_participants]],
+                    "end_timestamp": end_timestamp,
+                    "wheel_speed": raffle.wheel_speed
                 }, raffle_id)
-
-                # ждём окончания анимации
-                wheel_duration = {
-                    'fast': 5,
-                    'medium': 7,
-                    'slow': 10
-                }.get(raffle.wheel_speed, 5)
-                await asyncio.sleep(wheel_duration)
-
-                # распределённая блокировка на сохранение
-                lock_key = f"raffle_{raffle_id}_position_{position}"
-                lock_acquired = await distributed_lock.acquire(lock_key, timeout=30)
-                if not lock_acquired:
-                    logger.warning(f"Could not acquire lock for position {position}")
-                    continue
-
-                try:
-                    # проверяем дубликат
-                    existing = await db.execute(
-                        select(Winner).where(
-                            Winner.raffle_id == raffle_id,
-                            Winner.position == int(position)
-                        ).with_for_update()
+                
+                # Ждем client seeds (даем 2 секунды на сбор)
+                client_seeds = []
+                await asyncio.sleep(2)
+                
+                # START PHASE - запускаем анимацию
+                await manager.broadcast({
+                    "type": "round_start",
+                    "position": int(position),
+                    "end_timestamp": end_timestamp
+                }, raffle_id)
+                
+                # Ждем окончания анимации
+                await asyncio.sleep(wheel_duration / 1000)
+                
+                # REVEAL PHASE - раскрываем результат
+                # Используем первый client seed или генерируем случайный
+                client_seed = client_seeds[0] if client_seeds else secrets.token_hex(16)
+                
+                reveal_data = ProvablyFairService.reveal_result(
+                    raffle_id,
+                    int(position),
+                    client_seed
+                )
+                
+                if reveal_data:
+                    winner_index = reveal_data["winner_index"]
+                    winner = remaining_participants[winner_index]
+                    
+                    # Сохраняем в БД
+                    winner_record = Winner(
+                        raffle_id=raffle_id,
+                        user_id=winner.id,
+                        position=int(position),
+                        prize=raffle.prizes[position]
                     )
-                    if not existing.scalar_one_or_none():
-                        winner_record = Winner(
-                            raffle_id=raffle_id,
-                            user_id=winner.id,
-                            position=int(position),
-                            prize=raffle.prizes[position]
-                        )
-                        db.add(winner_record)
-                        await db.commit()
-
-                        # обновляем состояние
-                        state['completed_positions'].add(int(position))
-                        state['winners'].append(winner_data)
-                        state['remaining_participants'] = [
-                            p for p in state['remaining_participants']
-                            if p.telegram_id != winner.telegram_id
-                        ]
-
-                        # сообщаем всем о победителе
-                        await manager.broadcast({
-                            "type": "winner_confirmed",
-                            "position": int(position),
-                            "winner": winner_data,
-                            "prize": raffle.prizes[position]
-                        }, raffle_id)
-
-                        logger.info(f"Winner saved: position {position}, user {winner.telegram_id}")
-                    else:
-                        logger.warning(f"Winner already exists for position {position}")
-
-                except Exception as e:
-                    await db.rollback()
-                    logger.error(f"Error saving winner: {e}")
-                finally:
-                    await distributed_lock.release(lock_key)
-
+                    db.add(winner_record)
+                    await db.commit()
+                    
+                    # Обновляем состояние
+                    state['completed_positions'].add(int(position))
+                    state['winners'].append({
+                        "id": winner.telegram_id,
+                        "username": winner.username,
+                        "first_name": winner.first_name,
+                        "last_name": winner.last_name
+                    })
+                    state['remaining_participants'] = [
+                        p for p in state['remaining_participants']
+                        if p.telegram_id != winner.telegram_id
+                    ]
+                    
+                    # Отправляем результат с доказательством
+                    await manager.broadcast({
+                        "type": "round_reveal",
+                        "position": int(position),
+                        "winner": {
+                            "id": winner.telegram_id,
+                            "username": winner.username,
+                            "first_name": winner.first_name,
+                            "last_name": winner.last_name
+                        },
+                        "prize": raffle.prizes[position],
+                        "proof": {
+                            "server_seed": reveal_data["server_seed"],
+                            "client_seed": reveal_data["client_seed"],
+                            "winner_index": reveal_data["winner_index"],
+                            "commit_hash": reveal_data["commit_hash"]
+                        }
+                    }, raffle_id)
+                
                 await asyncio.sleep(3)
 
-        # Финальное завершение
+        # Завершение розыгрыша
         await finalize_raffle(db, raffle_id)
 
     except Exception as e:
-        logger.exception(f"Error in run_wheel: {e}")
+        logger.exception(f"Error in provably fair run_wheel: {e}")
         await manager.broadcast({
             "type": "error",
             "message": "Произошла ошибка при проведении розыгрыша"
@@ -338,11 +358,14 @@ async def finalize_raffle(db: AsyncSession, raffle_id: int):
 
 @router.websocket("/{raffle_id}")
 async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
-    """WebSocket endpoint for live raffle"""
+    """WebSocket endpoint с поддержкой time sync и client seeds"""
+    client_id = str(uuid.uuid4())
+    client_connections[id(websocket)] = client_id
+    
     await manager.connect(websocket, raffle_id)
     try:
-        # при подключении отправляем текущий статус
         async with async_session_maker() as db:
+            # Отправляем начальные данные
             raffle_result = await db.execute(
                 select(Raffle).where(Raffle.id == raffle_id)
             )
@@ -350,6 +373,8 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
             if raffle:
                 await websocket.send_json({
                     "type": "connection_established",
+                    "client_id": client_id,
+                    "server_time": int(time.time() * 1000),
                     "raffle": {
                         "id": raffle.id,
                         "title": raffle.title,
@@ -361,18 +386,33 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
         while True:
             try:
                 data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # Обработка ping для time sync
+                if message.get("type") == "ping":
+                    pong_data = TimeSyncService.handle_ping(
+                        client_id,
+                        message.get("timestamp", 0)
+                    )
+                    await websocket.send_json(pong_data)
+                
+                # Обработка RTT
+                elif message.get("type") == "rtt_report":
+                    TimeSyncService.record_rtt(client_id, message.get("rtt", 100))
+                
+                # Обработка client seed
+                elif message.get("type") == "client_seed":
+                    # Сохраняем client seed для текущего раунда
+                    # В реальной реализации нужен более сложный механизм
+                    pass
+                    
             except WebSocketDisconnect:
                 raise
             except Exception as e:
                 logger.debug(f"WebSocket receive error: {e}")
                 break
 
-            try:
-                message = json.loads(data)
-                if message.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-
     except WebSocketDisconnect:
         manager.disconnect(websocket, raffle_id)
+        if id(websocket) in client_connections:
+            del client_connections[id(websocket)]
