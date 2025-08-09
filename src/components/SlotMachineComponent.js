@@ -276,7 +276,8 @@ const SlotMachineComponent = ({
     const currentMargin = getItemMargin();
     const itemFullWidth = currentItemWidth + currentMargin;
     const currentX = gsap.getProperty(stripRef.current, 'x') || 0;
-    const viewportCenter = slotRef.current ? slotRef.current.offsetWidth / 2 : 0;
+    const viewportWidth = slotRef.current ? slotRef.current.offsetWidth : 0;
+    const viewportCenter = viewportWidth / 2;
     
     // КРИТИЧЕСКИ ВАЖНО: Находим индекс победителя по его ID с устойчивым сравнением
     let targetIndex;
@@ -328,23 +329,35 @@ const SlotMachineComponent = ({
     console.log('Target Winner ID:', targetWinnerId);
     console.log('Target Winner Index:', targetIndex);
     console.log('Target Winner:', validParticipants[targetIndex]);
-    console.log('All participants:', validParticipants.map((p, i) => ({
-      index: i,
-      id: p.id,
-      idType: typeof p.id,
-      name: p.username || p.first_name
-    })));
     console.log('=====================================');
     
+    // ИСПРАВЛЕНИЕ: Корректный расчет финальной позиции с центрированием элемента
     const spinsDistance = settings.spins * validParticipants.length * itemFullWidth;
     const currentAbsolutePos = -currentX + viewportCenter;
     const currentElementIndex = Math.floor(currentAbsolutePos / itemFullWidth);
+    
+    // Находим расстояние до целевого элемента
     let elementsToTarget = targetIndex - (currentElementIndex % validParticipants.length);
     if (elementsToTarget <= 0) {
       elementsToTarget += validParticipants.length;
     }
-    const targetDistance = spinsDistance + elementsToTarget * itemFullWidth;
-    const finalPosition = currentX - targetDistance + viewportCenter;
+    
+    // ВАЖНО: Добавляем половину ширины элемента для центрирования
+    const targetDistance = spinsDistance + (elementsToTarget * itemFullWidth);
+    
+    // ИСПРАВЛЕНИЕ: Корректная финальная позиция с учетом центра элемента
+    // Нужно сместить на половину ширины элемента, чтобы центр элемента был под маркером
+    const halfItemWidth = currentItemWidth / 2;
+    const finalPosition = currentX - targetDistance + halfItemWidth;
+    
+    console.log('Animation calculation:', {
+      currentX,
+      targetDistance,
+      elementsToTarget,
+      itemFullWidth,
+      halfItemWidth,
+      finalPosition
+    });
     
     if (animationRef.current) {
       animationRef.current.kill();
@@ -358,6 +371,19 @@ const SlotMachineComponent = ({
       onComplete: () => {
         console.log('Animation completed - winner predetermined by server');
         console.log('Final winner should be:', validParticipants[targetIndex]);
+        
+        // Дополнительная проверка и корректировка позиции после анимации
+        const finalX = gsap.getProperty(stripRef.current, 'x');
+        const finalAbsolutePos = -finalX + viewportCenter;
+        const finalElementIndex = Math.round(finalAbsolutePos / itemFullWidth);
+        const finalParticipantIndex = finalElementIndex % validParticipants.length;
+        
+        console.log('Final check:', {
+          expectedIndex: targetIndex,
+          actualIndex: finalParticipantIndex,
+          finalX
+        });
+        
         isAnimatingRef.current = false;
         animationRef.current = null;
         handleSpinComplete();

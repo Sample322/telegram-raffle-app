@@ -11,7 +11,8 @@ function LiveRafflePage() {
 
   // состояние для данных розыгрыша
   const [raffle, setRaffle] = useState(null);
-  const [participants, setParticipants] = useState([]);
+  const [initialParticipants, setInitialParticipants] = useState([]); // НОВОЕ: для предпоказа
+  const [currentParticipants, setCurrentParticipants] = useState([]); // НОВОЕ: текущие участники для UI
   const [currentRound, setCurrentRound] = useState(null);
   const [winners, setWinners] = useState([]);
 
@@ -36,7 +37,17 @@ function LiveRafflePage() {
           api.get(`/raffles/${id}/participants`)
         ]);
         setRaffle(raffleRes.data);
-        setParticipants(participantsRes.data);
+        
+        // Сохраняем начальных участников для предпоказа
+        const formattedParticipants = participantsRes.data.map(p => ({
+          id: p.telegram_id,
+          username: p.username,
+          first_name: p.first_name,
+          last_name: p.last_name
+        }));
+        
+        setInitialParticipants(formattedParticipants);
+        setCurrentParticipants(formattedParticipants);
 
         if (raffleRes.data.is_completed) {
           const completedRes = await api.get('/raffles/completed?limit=50');
@@ -75,7 +86,7 @@ function LiveRafflePage() {
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       
-      // НОВОЕ: проверяем sequence для защиты от устаревших событий
+      // Проверяем sequence для защиты от устаревших событий
       const messageSequence = data.sequence;
       if (messageSequence !== undefined && messageSequence < lastSequenceRef.current) {
         console.log(`Ignoring outdated message with sequence ${messageSequence}, current is ${lastSequenceRef.current}`);
@@ -104,7 +115,7 @@ function LiveRafflePage() {
           break;
 
         case 'slot_start': {
-          // НОВОЕ: защита от повторной обработки раунда
+          // Защита от повторной обработки раунда
           const roundKey = `${data.position}_${data.sequence}`;
           if (processedRoundsRef.current.has(roundKey)) {
             console.log(`Round ${roundKey} already processed, skipping`);
@@ -118,6 +129,7 @@ function LiveRafflePage() {
           console.log('=== SLOT START EVENT ===');
           console.log('Position:', data.position);
           console.log('Sequence:', data.sequence);
+          console.log('Participants count from server:', serverParticipants.length);
           console.log('Participants from server:', serverParticipants.map(p => ({
             id: p.id,
             name: p.username || p.first_name
@@ -152,15 +164,8 @@ function LiveRafflePage() {
             sequence: data.sequence
           });
 
-          // Обновляем общий список участников для UI (счетчик)
-          setParticipants(
-            serverParticipants.map((p) => ({
-              telegram_id: p.id,
-              username: p.username,
-              first_name: p.first_name,
-              last_name: p.last_name
-            }))
-          );
+          // Обновляем текущий список участников для UI
+          setCurrentParticipants(serverParticipants);
 
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
@@ -168,13 +173,18 @@ function LiveRafflePage() {
         }
 
         case 'winner_confirmed': {
-          // НОВОЕ: усиленная защита от дубликатов с учетом sequence
+          // Усиленная защита от дубликатов с учетом sequence
           const winnerKey = `${data.position}_${data.winner.id}_${data.sequence}`;
           if (processedWinnersRef.current.has(winnerKey)) {
             console.log(`Winner ${winnerKey} already processed, skipping`);
             return;
           }
           processedWinnersRef.current.add(winnerKey);
+
+          console.log('=== WINNER CONFIRMED ===');
+          console.log('Position:', data.position);
+          console.log('Winner:', data.winner);
+          console.log('Current participants before removal:', currentParticipants.length);
 
           setWinners((prev) => {
             const updated = [...prev];
@@ -187,13 +197,17 @@ function LiveRafflePage() {
             return updated;
           });
 
-          // Обновляем список участников убирая победителя
-          setParticipants((prev) => prev.filter((p) => 
-            String(p.telegram_id) !== String(data.winner.id)
-          ));
+          // ВАЖНО: Обновляем список участников, убирая победителя
+          setCurrentParticipants((prev) => {
+            const filtered = prev.filter((p) => 
+              String(p.id) !== String(data.winner.id)
+            );
+            console.log('Participants after removal:', filtered.length);
+            return filtered;
+          });
           
           setIsSpinning(false);
-          setCurrentRound(null);
+          setCurrentRound(null); // Очищаем текущий раунд
           
           toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
           break;
@@ -241,8 +255,10 @@ function LiveRafflePage() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // КРИТИЧЕСКИ ВАЖНО: используем участников ТОЛЬКО из currentRound для слот-машины
-  const slotParticipants = currentRound?.participants || [];
+  // ВАЖНО: Определяем какой список участников показывать
+  // Если есть текущий раунд - используем его участников
+  // Иначе показываем текущих участников (для предпоказа)
+  const slotParticipants = currentRound?.participants || currentParticipants;
 
   if (loading) {
     return (
@@ -331,8 +347,8 @@ function LiveRafflePage() {
               <p className="text-white text-lg">⏳ Ожидание участников...</p>
               <p className="text-white/80">
                 Текущее количество участников:{' '}
-                <strong className="text-xl">{participants.length}</strong>
-                {participants.length < Object.keys(raffle?.prizes || {}).length && (
+                <strong className="text-xl">{currentParticipants.length}</strong>
+                {currentParticipants.length < Object.keys(raffle?.prizes || {}).length && (
                   <span className="block mt-2 text-yellow-300">
                     Минимум для розыгрыша: {Object.keys(raffle?.prizes || {}).length}
                   </span>
@@ -391,7 +407,7 @@ function LiveRafflePage() {
         <div className="text-center bg-white/10 backdrop-blur-sm rounded-lg p-3">
           <p className="text-white">
             Всего участников:{' '}
-            <strong className="text-xl text-yellow-300">{participants.length}</strong>
+            <strong className="text-xl text-yellow-300">{currentParticipants.length}</strong>
           </p>
         </div>
 
