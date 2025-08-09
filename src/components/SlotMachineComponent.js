@@ -44,6 +44,7 @@ const SlotMachineComponent = ({
   raffleId,
   wheelSpeed = 'fast',
   targetWinnerId,
+  roundSeq,  // НОВОЕ: добавлен roundSeq
 }) => {
   // безопасный список участников
   const validParticipants = Array.isArray(participants) ? participants : [];
@@ -59,6 +60,7 @@ const SlotMachineComponent = ({
   const [itemWidth, setItemWidth] = useState(80);
   const hasNotifiedRef = useRef(false);
   const currentPrizeRef = useRef(null);
+  const currentRoundSeqRef = useRef(null);  // НОВОЕ
   const processedMessagesRef = useRef(new Set());
   const isSendingRef = useRef(false);
   const animationRef = useRef(null);
@@ -130,16 +132,19 @@ const SlotMachineComponent = ({
   }, []);
 
   /**
-   * при смене текущего приза очищаем кеш, чтобы новый раунд начинался с чистого состояния.
+   * при смене текущего приза или roundSeq очищаем кеш, чтобы новый раунд начинался с чистого состояния.
    */
   useEffect(() => {
-    if (currentPrize && currentPrize !== currentPrizeRef.current) {
-      currentPrizeRef.current = currentPrize;
+    if (roundSeq && roundSeq !== currentRoundSeqRef.current) {
+      currentRoundSeqRef.current = roundSeq;
       hasNotifiedRef.current = false;
       processedMessagesRef.current.clear();
       isSendingRef.current = false;
     }
-  }, [currentPrize]);
+    if (currentPrize && currentPrize !== currentPrizeRef.current) {
+      currentPrizeRef.current = currentPrize;
+    }
+  }, [currentPrize, roundSeq]);
 
   /**
    * создаёт полоску участников, дублируя их, чтобы анимация была длинной.
@@ -147,6 +152,13 @@ const SlotMachineComponent = ({
    */
   const createParticipantStrip = useCallback((preservePosition = false, currentX = null) => {
     if (!stripRef.current || validParticipants.length === 0) return;
+    
+    // ВАЖНО: Не пересоздаем ленту во время анимации
+    if (isAnimatingRef.current) {
+      console.log('Animation in progress, skipping strip recreation');
+      return;
+    }
+    
     stripRef.current.setAttribute('data-gsap-animated', 'true');
     stripRef.current.innerHTML = '';
     const duplicationFactor = getDuplicationFactor(wheelSpeed, validParticipants.length);
@@ -200,7 +212,7 @@ const SlotMachineComponent = ({
    * создаём ленту при монтировании и пересоздаём её, когда меняется список участников.
    */
   useEffect(() => {
-    if (!isResizingRef.current) {
+    if (!isResizingRef.current && !isAnimatingRef.current) {
       createParticipantStrip();
       setTimeout(() => updateHighlight(), 50);
     }
@@ -236,11 +248,12 @@ const SlotMachineComponent = ({
    * этот callback объявлен до startSpin, чтобы избежать ошибки TDZ.
    */
   const handleSpinComplete = useCallback(() => {
-    console.log('Animation completed');
+    console.log('Animation completed for round', currentRoundSeqRef.current);
     if (slotRef.current) {
       slotRef.current.classList.remove('spinning');
     }
     updateHighlight();
+    isAnimatingRef.current = false;
     if (onComplete) {
       const winner = currentHighlight || validParticipants[0];
       onComplete(winner);
@@ -249,16 +262,20 @@ const SlotMachineComponent = ({
 
   /**
    * запускает вращение. если сервер прислал targetWinnerId, останавливает ленту на нём.
-   * иначе использует первого участника (fallback).
    */
   const startSpin = useCallback(() => {
-    if (validParticipants.length === 0 || !stripRef.current || isAnimatingRef.current) return;
+    if (validParticipants.length === 0 || !stripRef.current) return;
     
-    console.log('Starting spin animation...');
-    console.log('Current participants in slot:', validParticipants.map(p => ({
-      id: p.id,
-      name: p.username || p.first_name
-    })));
+    // КРИТИЧЕСКИ ВАЖНО: Защита от параллельных анимаций
+    if (isAnimatingRef.current) {
+      console.warn('Animation already in progress, skipping new spin');
+      return;
+    }
+    
+    console.log('=== STARTING SPIN ANIMATION ===');
+    console.log('Round seq:', roundSeq);
+    console.log('Current participants count:', validParticipants.length);
+    console.log('Current participants IDs:', validParticipants.map(p => p.id));
     console.log('Target winner ID from server:', targetWinnerId);
     
     hasNotifiedRef.current = false;
@@ -285,23 +302,21 @@ const SlotMachineComponent = ({
       // Ищем участника с нужным ID с приведением к строке
       targetIndex = validParticipants.findIndex(p => {
         // Приводим оба значения к строке для надежного сравнения
-        return String(p.id) === String(targetWinnerId);
+        const participantId = String(p.id);
+        const searchId = String(targetWinnerId);
+        return participantId === searchId;
       });
       
       if (targetIndex === -1) {
         // FAIL-FAST: не начинаем анимацию если победителя нет в списке
-        console.error('CRITICAL: Winner not found in participants!', {
-          targetWinnerId,
-          targetWinnerIdType: typeof targetWinnerId,
-          participantIds: validParticipants.map(p => ({ 
-            id: p.id, 
-            type: typeof p.id 
-          })),
-          participants: validParticipants.map(p => ({
-            id: p.id, 
-            name: p.username || p.first_name
-          }))
-        });
+        console.error('=== CRITICAL ERROR: WINNER NOT FOUND ===');
+        console.error('Target winner ID:', targetWinnerId, '(type:', typeof targetWinnerId, ')');
+        console.error('Available participant IDs:', validParticipants.map(p => ({
+          id: p.id,
+          type: typeof p.id,
+          stringId: String(p.id)
+        })));
+        console.error('========================================');
         
         // Сбрасываем состояние анимации
         isAnimatingRef.current = false;
@@ -309,6 +324,10 @@ const SlotMachineComponent = ({
         // Уведомляем пользователя об ошибке
         if (window.toast) {
           window.toast.error('Ошибка синхронизации данных розыгрыша');
+        }
+        
+        if (onComplete) {
+          onComplete(null);
         }
         
         return; // НЕ ЗАПУСКАЕМ анимацию
@@ -322,14 +341,15 @@ const SlotMachineComponent = ({
     } else {
       console.error('CRITICAL: No winner ID provided by server!');
       isAnimatingRef.current = false;
+      if (onComplete) {
+        onComplete(null);
+      }
       return; // НЕ ЗАПУСКАЕМ анимацию без победителя
     }
     
-    console.log('=== SLOT MACHINE ANIMATION START ===');
-    console.log('Target Winner ID:', targetWinnerId);
     console.log('Target Winner Index:', targetIndex);
     console.log('Target Winner:', validParticipants[targetIndex]);
-    console.log('=====================================');
+    console.log('================================');
     
     // ИСПРАВЛЕНИЕ: Корректный расчет финальной позиции с центрированием элемента
     const spinsDistance = settings.spins * validParticipants.length * itemFullWidth;
@@ -342,11 +362,8 @@ const SlotMachineComponent = ({
       elementsToTarget += validParticipants.length;
     }
     
-    // ВАЖНО: Добавляем половину ширины элемента для центрирования
+    // Добавляем половину ширины элемента для центрирования
     const targetDistance = spinsDistance + (elementsToTarget * itemFullWidth);
-    
-    // ИСПРАВЛЕНИЕ: Корректная финальная позиция с учетом центра элемента
-    // Нужно сместить на половину ширины элемента, чтобы центр элемента был под маркером
     const halfItemWidth = currentItemWidth / 2;
     const finalPosition = currentX - targetDistance + halfItemWidth;
     
@@ -356,7 +373,8 @@ const SlotMachineComponent = ({
       elementsToTarget,
       itemFullWidth,
       halfItemWidth,
-      finalPosition
+      finalPosition,
+      targetIndex
     });
     
     if (animationRef.current) {
@@ -370,21 +388,21 @@ const SlotMachineComponent = ({
       onUpdate: updateHighlight,
       onComplete: () => {
         console.log('Animation completed - winner predetermined by server');
-        console.log('Final winner should be:', validParticipants[targetIndex]);
+        console.log('Expected winner:', validParticipants[targetIndex]);
         
-        // Дополнительная проверка и корректировка позиции после анимации
+        // Дополнительная проверка позиции после анимации
         const finalX = gsap.getProperty(stripRef.current, 'x');
         const finalAbsolutePos = -finalX + viewportCenter;
         const finalElementIndex = Math.round(finalAbsolutePos / itemFullWidth);
         const finalParticipantIndex = finalElementIndex % validParticipants.length;
         
-        console.log('Final check:', {
+        console.log('Final verification:', {
           expectedIndex: targetIndex,
           actualIndex: finalParticipantIndex,
-          finalX
+          expectedWinner: validParticipants[targetIndex],
+          currentHighlight: currentHighlight
         });
         
-        isAnimatingRef.current = false;
         animationRef.current = null;
         handleSpinComplete();
       },
@@ -394,7 +412,7 @@ const SlotMachineComponent = ({
         }
       },
     });
-  }, [validParticipants, wheelSpeed, targetWinnerId, itemWidth, updateHighlight, handleSpinComplete]);
+  }, [validParticipants, wheelSpeed, targetWinnerId, itemWidth, updateHighlight, handleSpinComplete, onComplete, roundSeq, currentHighlight]);
 
   // запускаем спин при isSpinning=true
   useEffect(() => {
