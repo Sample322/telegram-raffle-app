@@ -33,12 +33,11 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             logger.warning(f"Raffle {raffle_id} not found or already completed")
             return
 
-        # Загружаем участников в фиксированном порядке (по Telegram ID)
-        # ЗАМЕНИТЕ НА:
+        # ВАЖНО: Загружаем участников в ФИКСИРОВАННОМ порядке (по Telegram ID)
         participants_result = await db.execute(
             select(User).join(Participant)
             .where(Participant.raffle_id == raffle_id)
-            .order_by(User.telegram_id.asc())  # ВАЖНО: фиксированный порядок
+            .order_by(User.telegram_id.asc())  # ДЕТЕРМИНИРОВАННЫЙ ПОРЯДОК
         )
         participants = participants_result.scalars().all()
 
@@ -59,21 +58,23 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             "last_name": p.last_name
         } for p in participants]
 
-        # Инициализируем состояние розыгрыша
+        # Инициализируем состояние розыгрыша с sequence counter
         raffle_states[raffle_id] = {
             "participants": list(participants),
             "remaining_participants": list(participants),
             "winners": [],
             "completed_positions": set(),
             "participant_list": participant_list,
-            "lock": asyncio.Lock()  # локальная блокировка
+            "lock": asyncio.Lock(),
+            "sequence": 0  # НОВОЕ: счетчик последовательности
         }
 
         # Сообщаем всем клиентам о начале
         await manager.broadcast({
             "type": "raffle_starting",
             "total_participants": len(participants),
-            "total_prizes": len(raffle.prizes)
+            "total_prizes": len(raffle.prizes),
+            "sequence": 0
         }, raffle_id)
 
         await asyncio.sleep(3)
@@ -87,6 +88,10 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                 break
 
             async with state['lock']:
+                # Увеличиваем sequence для каждого раунда
+                state['sequence'] += 1
+                current_sequence = state['sequence']
+                
                 # пропускаем, если это место уже разыграно
                 if int(position) in state['completed_positions']:
                     logger.info(f"Position {position} already completed")
@@ -109,9 +114,9 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
 
                 # Логируем для отладки
                 logger.info(f"Position {position}: Selected winner {winner.username} (id={winner.telegram_id})")
-                logger.info(f"Remaining participants: {[p.telegram_id for p in remaining_participants]}")
+                logger.info(f"Remaining participants before: {[p.telegram_id for p in remaining_participants]}")
 
-                # ВАЖНО: Формируем список ТОЛЬКО из оставшихся участников
+                # КРИТИЧЕСКИ ВАЖНО: Формируем список ТОЛЬКО из оставшихся участников
                 remaining_participant_list = [{
                     "id": p.telegram_id,
                     "username": p.username or f"{p.first_name} {p.last_name or ''}".strip(),
@@ -124,10 +129,11 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                     "type": "slot_start",
                     "position": int(position),
                     "prize": raffle.prizes[position],
-                    "participants": remaining_participant_list,  # ← ИСПРАВЛЕНО!
+                    "participants": remaining_participant_list,  # ИСПРАВЛЕНО: только оставшиеся!
                     "predetermined_winner_id": winner.telegram_id,
                     "predetermined_winner": winner_data,
-                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants]
+                    "remaining_participants_ids": [p.telegram_id for p in remaining_participants],
+                    "sequence": current_sequence  # НОВОЕ: добавляем sequence
                 }, raffle_id)
 
                 # ждём окончания анимации
@@ -176,10 +182,12 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
                             "type": "winner_confirmed",
                             "position": int(position),
                             "winner": winner_data,
-                            "prize": raffle.prizes[position]
+                            "prize": raffle.prizes[position],
+                            "sequence": current_sequence  # НОВОЕ: добавляем sequence
                         }, raffle_id)
 
                         logger.info(f"Winner saved: position {position}, user {winner.telegram_id}")
+                        logger.info(f"Remaining participants after: {[p.telegram_id for p in state['remaining_participants']]}")
                     else:
                         logger.warning(f"Winner already exists for position {position}")
 
@@ -200,93 +208,6 @@ async def run_wheel(raffle_id: int, db: AsyncSession):
             "type": "error",
             "message": "Произошла ошибка при проведении розыгрыша"
         }, raffle_id)
-
-async def handle_winner_selected(db: AsyncSession, raffle_id: int, winner_data: dict, position: int, prize: str) -> bool:
-    """Предыдущая логика ручного подтверждения победителя оставлена для обратной совместимости."""
-    try:
-        state = raffle_states.get(raffle_id)
-        if not state:
-            logger.error(f"No state found for raffle {raffle_id}")
-            return False
-
-        # защита от повторных сообщений
-        message_id = winner_data.get('messageId')
-        if message_id and message_id in processed_messages.get(raffle_id, set()):
-            logger.info(f"Duplicate message {message_id} ignored")
-            return False
-
-        logger.info(f"Handling winner for raffle {raffle_id}, position {position}, winner_id: {winner_data.get('id')}")
-
-        # проверяем, что всё ещё ждём результат для этой позиции
-        if position in state.get('completed_positions', set()):
-            logger.warning(f"Position {position} already completed")
-            return False
-
-        if not state.get('waiting_for_result'):
-            logger.warning(f"Not waiting for result for position {position}")
-            return False
-
-        # находим пользователя
-        user_result = await db.execute(
-            select(User).where(User.telegram_id == winner_data['id'])
-        )
-        user = user_result.scalar_one_or_none()
-        if not user:
-            logger.error(f"User with telegram_id {winner_data['id']} not found")
-            return False
-
-        try:
-            # проверяем дубликат
-            existing_winner = await db.execute(
-                select(Winner).where(
-                    Winner.raffle_id == raffle_id,
-                    Winner.position == position
-                ).with_for_update()
-            )
-            if existing_winner.scalar_one_or_none():
-                logger.warning(f"Winner already exists for position {position} in raffle {raffle_id}")
-                state['waiting_for_result'] = False
-                state['completed_positions'].add(position)
-                return False
-
-            # сохраняем победителя
-            winner_record = Winner(
-                raffle_id=raffle_id,
-                user_id=user.id,
-                position=position,
-                prize=prize
-            )
-            db.add(winner_record)
-            await db.commit()
-            state['waiting_for_result'] = False
-            state['completed_positions'].add(position)
-            state['winners'].append(winner_data)
-            state['remaining_participants'] = [
-                p for p in state['remaining_participants']
-                if p.telegram_id != winner_data['id']
-            ]
-            await manager.broadcast({
-                "type": "winner_confirmed",
-                "position": position,
-                "winner": winner_data,
-                "prize": prize
-            }, raffle_id)
-            if message_id:
-                if raffle_id not in processed_messages:
-                    processed_messages[raffle_id] = set()
-                processed_messages[raffle_id].add(message_id)
-            logger.info(f"Winner confirmed for position {position}: {winner_data.get('username', 'Unknown')}")
-            return True
-
-        except Exception as e:
-            await db.rollback()
-            logger.exception(f"Error in transaction: {e}")
-            state['waiting_for_result'] = False
-            return False
-
-    except Exception as e:
-        logger.exception(f"Error handling winner selection: {e}")
-        return False
 
 async def finalize_raffle(db: AsyncSession, raffle_id: int):
     """Проверяем, все ли призы выданы, и завершаем розыгрыш"""
@@ -357,6 +278,11 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
             )
             raffle = raffle_result.scalar_one_or_none()
             if raffle:
+                # Отправляем текущий sequence если розыгрыш активен
+                current_sequence = 0
+                if raffle_id in raffle_states:
+                    current_sequence = raffle_states[raffle_id].get('sequence', 0)
+                    
                 await websocket.send_json({
                     "type": "connection_established",
                     "raffle": {
@@ -364,7 +290,8 @@ async def websocket_endpoint(websocket: WebSocket, raffle_id: int):
                         "title": raffle.title,
                         "is_completed": raffle.is_completed,
                         "draw_started": raffle.draw_started
-                    }
+                    },
+                    "sequence": current_sequence  # НОВОЕ: отправляем текущий sequence
                 })
 
         while True:
