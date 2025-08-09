@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
@@ -21,6 +21,11 @@ function LiveRafflePage() {
   const [countdown, setCountdown] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
+
+  // НОВОЕ: отслеживание sequence для защиты от устаревших событий
+  const lastSequenceRef = useRef(0);
+  const processedRoundsRef = useRef(new Set());
+  const processedWinnersRef = useRef(new Set());
 
   // загрузка деталей розыгрыша
   useEffect(() => {
@@ -69,37 +74,87 @@ function LiveRafflePage() {
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      
+      // НОВОЕ: проверяем sequence для защиты от устаревших событий
+      const messageSequence = data.sequence;
+      if (messageSequence !== undefined && messageSequence < lastSequenceRef.current) {
+        console.log(`Ignoring outdated message with sequence ${messageSequence}, current is ${lastSequenceRef.current}`);
+        return;
+      }
+      if (messageSequence !== undefined) {
+        lastSequenceRef.current = messageSequence;
+      }
+
       switch (data.type) {
         case 'connection_established':
           if (data.raffle.is_completed) {
             setConnectionStatus('completed');
           }
+          // Синхронизируем sequence при подключении
+          if (data.sequence !== undefined) {
+            lastSequenceRef.current = data.sequence;
+          }
           break;
 
         case 'raffle_starting':
           toast.success('Розыгрыш начинается!');
+          // Сбрасываем состояние при начале нового розыгрыша
+          processedRoundsRef.current.clear();
+          processedWinnersRef.current.clear();
           break;
 
         case 'slot_start': {
+          // НОВОЕ: защита от повторной обработки раунда
+          const roundKey = `${data.position}_${data.sequence}`;
+          if (processedRoundsRef.current.has(roundKey)) {
+            console.log(`Round ${roundKey} already processed, skipping`);
+            return;
+          }
+          processedRoundsRef.current.add(roundKey);
+
+          // КРИТИЧЕСКИ ВАЖНО: используем ТОЛЬКО участников из события
           const serverParticipants = Array.isArray(data.participants) ? data.participants : [];
-          // Сервер уже прислал только оставшихся участников!
-          const availableParticipants = serverParticipants;
+          
+          console.log('=== SLOT START EVENT ===');
+          console.log('Position:', data.position);
+          console.log('Sequence:', data.sequence);
+          console.log('Participants from server:', serverParticipants.map(p => ({
+            id: p.id,
+            name: p.username || p.first_name
+          })));
+          console.log('Predetermined winner ID:', data.predetermined_winner_id);
+          console.log('========================');
 
           // ID победителя от сервера
           const winnerId = data.predetermined_winner_id;
+
+          // Проверяем что победитель есть в списке
+          const winnerExists = serverParticipants.some(p => 
+            String(p.id) === String(winnerId)
+          );
+          
+          if (!winnerExists) {
+            console.error('CRITICAL: Winner not in participants list!', {
+              winnerId,
+              participantIds: serverParticipants.map(p => p.id)
+            });
+            toast.error('Ошибка синхронизации данных розыгрыша');
+            return;
+          }
 
           // Обновляем состояние текущего раунда
           setCurrentRound({
             position: data.position,
             prize: data.prize,
-            participants: availableParticipants,
+            participants: serverParticipants, // ТОЛЬКО от сервера!
             predeterminedWinnerId: winnerId,
-            predeterminedWinner: data.predetermined_winner
+            predeterminedWinner: data.predetermined_winner,
+            sequence: data.sequence
           });
 
-          // Обновляем общий список участников для счетчика
+          // Обновляем общий список участников для UI (счетчик)
           setParticipants(
-            availableParticipants.map((p) => ({
+            serverParticipants.map((p) => ({
               telegram_id: p.id,
               username: p.username,
               first_name: p.first_name,
@@ -109,22 +164,17 @@ function LiveRafflePage() {
 
           setIsSpinning(true);
           toast(`🎰 Разыгрывается ${data.position} место!`);
-          console.log('Начался раунд', {
-            position: data.position,
-            winnerId,
-            availableIds: availableParticipants.map(p => p.id)
-          });
           break;
         }
 
         case 'winner_confirmed': {
-          const winnerKey = `${data.position}_${data.winner.id}`;
-          const processedKey = `processed_winners_${id}`;
-          if (!window[processedKey]) {
-            window[processedKey] = new Set();
+          // НОВОЕ: усиленная защита от дубликатов с учетом sequence
+          const winnerKey = `${data.position}_${data.winner.id}_${data.sequence}`;
+          if (processedWinnersRef.current.has(winnerKey)) {
+            console.log(`Winner ${winnerKey} already processed, skipping`);
+            return;
           }
-          if (window[processedKey].has(winnerKey)) break;
-          window[processedKey].add(winnerKey);
+          processedWinnersRef.current.add(winnerKey);
 
           setWinners((prev) => {
             const updated = [...prev];
@@ -137,24 +187,17 @@ function LiveRafflePage() {
             return updated;
           });
 
-          setParticipants((prev) => prev.filter((p) => p.telegram_id !== data.winner.id));
+          // Обновляем список участников убирая победителя
+          setParticipants((prev) => prev.filter((p) => 
+            String(p.telegram_id) !== String(data.winner.id)
+          ));
+          
           setIsSpinning(false);
-          if (!data.auto_selected) {
-            toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
-          }
+          setCurrentRound(null);
+          
+          toast.success(`🎉 Победитель ${data.position} места: @${data.winner.username || data.winner.first_name}!`);
           break;
         }
-
-        case 'round_complete':
-          setCurrentRound((prev) => {
-            if (prev && prev.position === data.position) return null;
-            return prev;
-          });
-          setIsSpinning(false);
-          if (data.winner_id) {
-            setParticipants((prev) => prev.filter((p) => p.telegram_id !== data.winner_id));
-          }
-          break;
 
         case 'raffle_complete':
           setWinners(data.winners);
@@ -180,14 +223,17 @@ function LiveRafflePage() {
     };
 
     ws.onerror = () => setConnectionStatus('error');
-    ws.onclose = () => setConnectionStatus('error');
+    ws.onclose = () => {
+      if (ws.pingInterval) clearInterval(ws.pingInterval);
+      setConnectionStatus('error');
+    };
     setSocket(ws);
 
     return () => {
       if (ws.pingInterval) clearInterval(ws.pingInterval);
       ws.close();
     };
-  }, [id, winners]);
+  }, [id]);
 
   const formatCountdown = (seconds) => {
     const minutes = Math.floor(seconds / 60);
@@ -195,13 +241,8 @@ function LiveRafflePage() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ВАЖНО: Используем участников из currentRound, а не локальный список
-  const slotParticipants = currentRound?.participants || participants.map((p) => ({
-    id: p.telegram_id,
-    username: p.username,
-    first_name: p.first_name,
-    last_name: p.last_name
-  }));
+  // КРИТИЧЕСКИ ВАЖНО: используем участников ТОЛЬКО из currentRound для слот-машины
+  const slotParticipants = currentRound?.participants || [];
 
   if (loading) {
     return (

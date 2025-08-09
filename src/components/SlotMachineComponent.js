@@ -43,7 +43,7 @@ const SlotMachineComponent = ({
   socket,
   raffleId,
   wheelSpeed = 'fast',
-  targetWinnerId,  // ИЗМЕНЕНО: принимаем ID вместо индекса
+  targetWinnerId,
 }) => {
   // безопасный список участников
   const validParticipants = Array.isArray(participants) ? participants : [];
@@ -278,24 +278,39 @@ const SlotMachineComponent = ({
     const currentX = gsap.getProperty(stripRef.current, 'x') || 0;
     const viewportCenter = slotRef.current ? slotRef.current.offsetWidth / 2 : 0;
     
-    // ИЗМЕНЕНО: Находим индекс победителя по его ID
+    // КРИТИЧЕСКИ ВАЖНО: Находим индекс победителя по его ID с устойчивым сравнением
     let targetIndex;
     if (targetWinnerId !== undefined && targetWinnerId !== null) {
-      // Ищем участника с нужным ID в текущем списке
+      // Ищем участника с нужным ID с приведением к строке
       targetIndex = validParticipants.findIndex(p => {
-        // Сравниваем как числа и как строки для надежности
-        return p.id === targetWinnerId || 
-               p.id === String(targetWinnerId) || 
-               String(p.id) === String(targetWinnerId);
+        // Приводим оба значения к строке для надежного сравнения
+        return String(p.id) === String(targetWinnerId);
       });
       
       if (targetIndex === -1) {
+        // FAIL-FAST: не начинаем анимацию если победителя нет в списке
         console.error('CRITICAL: Winner not found in participants!', {
           targetWinnerId,
-          participantIds: validParticipants.map(p => p.id),
-          participants: validParticipants.map(p => ({id: p.id, name: p.username || p.first_name}))
+          targetWinnerIdType: typeof targetWinnerId,
+          participantIds: validParticipants.map(p => ({ 
+            id: p.id, 
+            type: typeof p.id 
+          })),
+          participants: validParticipants.map(p => ({
+            id: p.id, 
+            name: p.username || p.first_name
+          }))
         });
-        targetIndex = 0;
+        
+        // Сбрасываем состояние анимации
+        isAnimatingRef.current = false;
+        
+        // Уведомляем пользователя об ошибке
+        if (window.toast) {
+          window.toast.error('Ошибка синхронизации данных розыгрыша');
+        }
+        
+        return; // НЕ ЗАПУСКАЕМ анимацию
       } else {
         console.log('✅ Found winner by ID:', {
           winnerId: targetWinnerId,
@@ -305,19 +320,21 @@ const SlotMachineComponent = ({
       }
     } else {
       console.error('CRITICAL: No winner ID provided by server!');
-      targetIndex = 0;
+      isAnimatingRef.current = false;
+      return; // НЕ ЗАПУСКАЕМ анимацию без победителя
     }
     
-    console.log('=== SLOT MACHINE SYNC DEBUG ===');
+    console.log('=== SLOT MACHINE ANIMATION START ===');
     console.log('Target Winner ID:', targetWinnerId);
-    console.log('Current participants:', validParticipants.map((p, i) => ({
+    console.log('Target Winner Index:', targetIndex);
+    console.log('Target Winner:', validParticipants[targetIndex]);
+    console.log('All participants:', validParticipants.map((p, i) => ({
       index: i,
       id: p.id,
+      idType: typeof p.id,
       name: p.username || p.first_name
     })));
-    console.log('Will stop on index:', targetIndex);
-    console.log('Will stop on participant:', validParticipants[targetIndex]);
-    console.log('================================');
+    console.log('=====================================');
     
     const spinsDistance = settings.spins * validParticipants.length * itemFullWidth;
     const currentAbsolutePos = -currentX + viewportCenter;
@@ -340,6 +357,7 @@ const SlotMachineComponent = ({
       onUpdate: updateHighlight,
       onComplete: () => {
         console.log('Animation completed - winner predetermined by server');
+        console.log('Final winner should be:', validParticipants[targetIndex]);
         isAnimatingRef.current = false;
         animationRef.current = null;
         handleSpinComplete();
